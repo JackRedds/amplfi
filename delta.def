@@ -12,12 +12,17 @@ From: /sw/external/NGC/pytorch_23.05-py3.sif
 
 python -m pip install --upgrade pip && python -m pip install uv
 
+# Install compatible numpy and numba
+python -m pip install "numpy==1.23.5" && python -m pip install "numba==0.56.4" && python -m pip install "torch==2.6.0" && python -m pip install "torchaudio"
+
+
 cd /amplfi/ \
     && uv export --format requirements-txt -o requirements.txt.tmp --no-hashes \
-    && cat requirements.txt.tmp | grep -v 'torch==' | grep -v 'torchaudio==' | grep -v 'triton' | grep -v 'protobuf' | grep -v 'nvidia' > requirements.txt \
+    && cat requirements.txt.tmp |grep -v 'numpy=='| grep -v 'torch==' | grep -v 'torchaudio==' | grep -v 'triton' | grep -v 'protobuf' | grep -v 'nvidia' > requirements.txt \
     && rm requirements.txt.tmp \
     && python -m pip install -r requirements.txt --no-deps \
     && python -m pip install -e . --no-deps
+
 
 %runscript
 #!/bin/bash
