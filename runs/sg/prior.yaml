@@ -1,7 +1,6 @@
 # default prior for use with `IMRPhenomPv2`
 class_path: amplfi.train.data.utils.utils.ParameterSampler
 init_args:
-  conversion_function: amplfi.train.conversion.precessing_to_lalsimulation_parameters
   parameters:
     frequency:
       class_path: torch.distributions.Uniform
