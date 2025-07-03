@@ -13,7 +13,7 @@ trainer:
         project: amplfi
         # uncomment and set to name your run
         # name: my-amplfi-run 
-  max_epochs: 800
+  max_epochs: 1
   check_val_every_n_epoch: 1
   log_every_n_steps: 50
   benchmark: false
@@ -72,8 +72,8 @@ data:
     fduration: 2
     psd_length: 10
     fftlength: 2
-    batches_per_epoch: 800
-    batch_size: 512
+    batches_per_epoch: 1
+    batch_size: 1
     ifos: ["H1", "L1"]
     min_valid_duration: 10000.0
     num_files_per_batch: 10
@@ -97,8 +97,8 @@ data:
             low: 0
             high: 6.28318
             validate_args: false
-        num_val_waveforms: 10000
-        num_test_waveforms: 200
+        num_val_waveforms: 1
+        num_test_waveforms: 1
         approximant: ml4gw.waveforms.IMRPhenomPv2
         f_min: 20
         f_ref: 40

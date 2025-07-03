@@ -1,4 +1,5 @@
 from typing import Literal, Optional
+import numpy as np
 
 import torch
 from ml4gw.nn.norm import NormLayer

@@ -58,10 +58,7 @@ class ParameterSampler:
         # perform any necessary conversions
         # to from sampled parameters to
         # waveform generation parameters
-        if self.wf_sg == True:
-            pass
-        else:
-            parameters = self.conversion_function(parameters)
+        parameters = self.conversion_function(parameters)
         return parameters
 
 

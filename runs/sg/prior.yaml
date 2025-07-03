@@ -11,14 +11,14 @@ init_args:
     quality:
       class_path: torch.distributions.Uniform
       init_args:
-        low: 2
-        high: 100
+        low: 25
+        high: 75
         validate_args: false
     hrss:
       class_path: ml4gw.distributions.LogUniform
       init_args:
-        low: 32
-        high: 1024
+        low: 1e-21
+        high: 2e-21
         validate_args: false
     phase:
       class_path: torch.distributions.Uniform
@@ -30,5 +30,5 @@ init_args:
       class_path: torch.distributions.Uniform
       init_args:
         low: 0
-        high: 1
+        high: 0.01
         validate_args: false

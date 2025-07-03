@@ -57,7 +57,7 @@ model:
             norm_layer:
               class_path: ml4gw.nn.norm.GroupNorm1DGetter
               init_args:
-                groups: 8
+                groups: 16
     learning_rate: 0.00071444
     pct_start: 0.1
     weight_decay: 0.00042
@@ -68,11 +68,11 @@ data:
     inference_params: ["frequency", "quality", "hrss", "phase", "eccentricity", "dec", "psi", "phi"]
     highpass: 25
     sample_rate: 2048
-    kernel_length: 3
+    kernel_length: 5
     fduration: 2
-    psd_length: 10
+    psd_length: 12
     fftlength: 2
-    batches_per_epoch: 800
+    batches_per_epoch: 200
     batch_size: 512
     ifos: ["H1", "L1"]
     min_valid_duration: 10000.0
@@ -97,4 +97,4 @@ data:
             high: 6.28318
             validate_args: false
         num_val_waveforms: 10000
-        num_test_waveforms: 200
+        num_test_waveforms: 1000
