@@ -15,7 +15,7 @@ init_args:
         high: 75
         validate_args: false
     hrss:
-      class_path: ml4gw.distributions.Uniform
+      class_path: torch.distributions.Uniform
       init_args:
         low: 1e-21
         high: 2e-21
