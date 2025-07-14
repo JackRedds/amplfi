@@ -12,10 +12,8 @@ class FlowDataset(AmplfiDataset):
     def inject(self, X, cross, plus, parameters):
         self.projector.to(self.device)
         self.whitener.to(self.device)
-        self.pre_waveform = X
         X, psds = self.psd_estimator(X)
         dec, psi, phi = self.waveform_sampler.sample_extrinsic(X)
-
         waveforms = self.projector(dec, psi, phi, cross=cross, plus=plus)
         # append extrinsic parameters to parameters
         parameters.update({"dec": dec, "psi": psi, "phi": phi})
@@ -44,7 +42,6 @@ class FlowDataset(AmplfiDataset):
             self.hparams.sample_rate,
             self.hparams.highpass,
         )
-        self.waveforms = waveforms
         X += waveforms
         X = self.whitener(X, psds)
 

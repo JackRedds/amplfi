@@ -199,11 +199,10 @@ class FlowModel(AmplfiModel):
         samples = samples.squeeze(1)
         descaled = self.scale(samples, reverse=True)
         descaled, mask = self.filter_parameters(descaled)
-
         log_probs = log_probs[mask]
         result = self.cast_as_bilby_result(
             descaled.cpu().numpy(),
-            log_probs.cpu().numpy(),
+            log_probs.cpu().detach().numpy(),
             None,
         )
 
