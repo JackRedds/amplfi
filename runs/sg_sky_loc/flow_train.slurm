@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --job-name=sg-training
+#SBATCH --job-name=sg-sky-loc
 #SBATCH --account=bcse-delta-gpu
-#SBATCH --output=/scratch/bcse/jredepenning/run4/sg/%x.out
-#SBATCH --error=/scratch/bcse/jredepenning/run4/sg/%x.err
+#SBATCH --output=/scratch/bcse/jredepenning/run5/sg/%x.out
+#SBATCH --error=/scratch/bcse/jredepenning/run5/sg/%x.err
 #SBATCH --time=48:00:00
 #SBATCH --partition=gpuA100x8
 #SBATCH --gres=gpu:1
@@ -13,10 +13,10 @@
 #SBATCH --mail-type=END
 #SBATCH --mail-user=redep028@umn.edu
 
-RUN_TYPE="sg"
+RUN_TYPE="sg_sky_loc"
 export PROJECT_DIR=/projects/bcse/jredepenning/
 export AMPLFI_CONTAINER_ROOT=/scratch/bcse/jredepenning/
-export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/run4/${RUN_TYPE}
+export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/run5/${RUN_TYPE}
 export AMPLFI_CONDORDIR=$AMPLFI_OUTDIR/condor
 
 export AMPLFI_DATADIR=/projects/bcse/deep1018/amplfi-data-dir-O3

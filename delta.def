@@ -18,7 +18,7 @@ python -m pip install "numpy==1.23.5" && python -m pip install "numba==0.56.4" &
 
 cd /amplfi/ \
     && uv export --format requirements-txt -o requirements.txt.tmp --no-hashes \
-    && cat requirements.txt.tmp |grep -v 'numpy=='| grep -v 'torch==' | grep -v 'torchaudio==' | grep -v 'triton' | grep -v 'protobuf' | grep -v 'nvidia' > requirements.txt \
+    && cat requirements.txt.tmp |grep -v 'numpy=='| grep -v 'torch==' | grep -v 'torchaudio==' | grep -v 'triton' | grep -v 'protobuf' | grep -v 'nvidia' | grep -v 'optuna' > requirements.txt \
     && rm requirements.txt.tmp \
     && python -m pip install -r requirements.txt --no-deps \
     && python -m pip install -e . --no-deps
