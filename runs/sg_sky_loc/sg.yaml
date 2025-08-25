@@ -13,7 +13,7 @@ trainer:
         project: amplfi
         # uncomment and set to name your run
         # name: my-amplfi-run 
-  max_epochs: 767
+  max_epochs: 1
   check_val_every_n_epoch: 1
   log_every_n_steps: 50
   benchmark: false
@@ -58,14 +58,14 @@ model:
               class_path: ml4gw.nn.norm.GroupNorm1DGetter
               init_args:
                 groups: 16
-    learning_rate: 0.00071444
+    learning_rate: 7.14e-4
     pct_start: 0.1
     weight_decay: 0.00042
 data:
   class_path: amplfi.train.data.datasets.FlowDataset
   init_args:
     data_dir: ${oc.env:AMPLFI_DATADIR}
-    inference_params: ["frequency", "quality", "hrss", "phase", "eccentricity", "dec", "psi", "phi"]
+    inference_params: ["phase", "dec", "psi", "phi"]
     highpass: 25
     sample_rate: 2048
     kernel_length: 5
@@ -76,7 +76,7 @@ data:
     batch_size: 512
     ifos: ["H1", "L1"]
     min_valid_duration: 10000.0
-    num_files_per_batch: 4
+    num_files_per_batch: 3
     waveform_sampler: 
       class_path: amplfi.train.data.waveforms.generator.sg.SGGenerator
       init_args:
