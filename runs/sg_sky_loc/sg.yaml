@@ -14,7 +14,7 @@ trainer:
         # uncomment and set to name your run
         # name: my-amplfi-run 
   max_epochs: 800
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 10
   log_every_n_steps: 50
   benchmark: false
   callbacks:
@@ -58,9 +58,9 @@ model:
               class_path: ml4gw.nn.norm.GroupNorm1DGetter
               init_args:
                 groups: 16
-    learning_rate: 7.14e-4
+    learning_rate: 1.14e-3
     pct_start: 0.1
-    weight_decay: 0.00042
+    weight_decay: 0.042
 data:
   class_path: amplfi.train.data.datasets.FlowDataset
   init_args:
@@ -72,11 +72,11 @@ data:
     fduration: 2
     psd_length: 12
     fftlength: 2
-    batches_per_epoch: 200
-    batch_size: 512
+    batches_per_epoch: 100
+    batch_size: 128
     ifos: ["H1", "L1"]
     min_valid_duration: 10000.0
-    num_files_per_batch: 3
+    num_files_per_batch: 10
     waveform_sampler: 
       class_path: amplfi.train.data.waveforms.generator.sg.SGGenerator
       init_args:
@@ -97,4 +97,4 @@ data:
             high: 6.28318
             validate_args: false
         num_val_waveforms: 10000
-        num_test_waveforms: 250
+        num_test_waveforms: 500

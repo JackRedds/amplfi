@@ -4,12 +4,11 @@ export AMPLFI_CONTAINER_ROOT=/scratch/bcse/jredepenning/
 export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/run5/${RUN_TYPE}
 export AMPLFI_CONDORDIR=$AMPLFI_OUTDIR/condor
 
-export AMPLFI_DATADIR=/projects/bcse/deep1018/amplfi-data-dir-O3
+export AMPLFI_DATADIR=$PROJECT_DIR/amplfi-data-dir-O3b-HLV_small
 export FLOW_CONFIG=$PROJECT_DIR/amplfi/runs/${RUN_TYPE}/sg.yaml
 
 # launch training pipeline
-apptainer run --nv -B ${AMPLFI_DATADIR} -B ${AMPLFI_OUTDIR} -B ${FLOW_CONFIG} \
-        ${AMPLFI_CONTAINER_ROOT}/delta.sif \
-        python tuing.py
+source /projects/bcse/jredepenning/amplfi/.venv/bin/activate
+python tuing.py
 
 ## sg
