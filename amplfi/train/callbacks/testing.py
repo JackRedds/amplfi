@@ -285,7 +285,7 @@ class SaveFITS(pl.Callback):
             result.to_skymap(
                 self.nside,
                 self.min_samples_per_pix,
-                use_distance=True,
+                use_distance=False,
             )
         )
         outdir.mkdir(exist_ok=True)
@@ -406,7 +406,7 @@ def crossmatch_skymap(
     crossmatch_result = result.to_crossmatch_result(
         nside=nside,
         min_samples_per_pix=min_samples_per_pix,
-        use_distance=True,
+        use_distance=False,
         contours=contours,
     )
     return crossmatch_result

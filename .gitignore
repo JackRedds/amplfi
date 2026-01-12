@@ -1,8 +1,8 @@
 **/__pycache__
 **/.ipynb_checkpoints
-**/*.ipynb
 **/*.log
 **/*.env
 **/*.sif
 **/*.hdf5
+runs/
 _build

@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, OrderedDict
 
 import torch
 
@@ -22,6 +22,7 @@ class ParameterTransformer(torch.nn.Module):
         # update parameter dict
         parameters.update(transformed)
         return parameters
+
 
 
 class ParameterSampler:
@@ -61,6 +62,52 @@ class ParameterSampler:
 
         parameters = self.conversion_function(parameters)
         return parameters
+        
+
+class MultiSGParameterSampler(ParameterSampler):
+    def __init__(
+        self,
+        parameters: dict[str, torch.distributions.Distribution],
+        conversion_function: Optional[Callable] = None,
+    ):
+        """
+        A class for sampling parameters from a prior distribution
+
+        Args:
+            parameters:
+                A dictionary of parameter samplers that take an integer N
+                and return a tensor of shape (N, ...) representing
+                samples from the prior distribution
+            conversion_function:
+                A callable that takes a dictionary of sampled parameters
+                and returns a dictionary of waveform generation parameters
+        """
+        self.parameters = parameters
+        self.conversion_function = conversion_function or (lambda x: x)
+
+    def __call__(
+        self,
+        N: int,
+        n_max: int = 10,
+        device: str = "cpu",
+    ):
+        rand_int = torch.randint(1, n_max + 1, (N,), device=device)
+        # sample parameters from prior
+        waveform_parameters = {
+            f"{i}": {
+                k: v.sample((rand_int[i],)).to(device) for k, v in self.parameters.items()
+            }
+            for i in range(N)
+        }
+
+        # for i in range(N):
+            # waveform_parameters.update(self.conversion_function(waveform_parameters[f"{i}"]))
+
+        # perform any necessary conversions
+        # to from sampled parameters to
+        # waveform generation parameters
+
+        return waveform_parameters
 
 
 class ZippedDataset(torch.utils.data.IterableDataset):
