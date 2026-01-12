@@ -1,4 +1,0 @@
-# default prior for use with `IMRPhenomPv2`
-class_path: amplfi.train.data.utils.utils.ParameterSamplerMultiSG
-init_args:
-  n_max: 10
