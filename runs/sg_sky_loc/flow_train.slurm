@@ -15,6 +15,7 @@
 
 RUN_TYPE="sg_sky_loc"
 export SSL_CERT_FILE=/projects/bcse/jredepenning/amplfi/runs/sg_sky_loc/cacert.pem
+export SINGULARITY_BIND="/etc/ssl/certs:/etc/ssl/certs,/etc/pki:/etc/pki"
 export PROJECT_DIR=/projects/bcse/jredepenning/
 export AMPLFI_CONTAINER_ROOT=/scratch/bcse/jredepenning/
 export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/sg_runs/${RUN_TYPE}

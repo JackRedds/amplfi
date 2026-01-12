@@ -13,7 +13,7 @@ trainer:
         project: amplfi
         # uncomment and set to name your run
         # name: my-amplfi-run 
-  max_epochs: 800
+  max_epochs: 3
   check_val_every_n_epoch: 1
   log_every_n_steps: 50
   benchmark: false
@@ -65,7 +65,7 @@ data:
   class_path: amplfi.train.data.datasets.FlowDataset
   init_args:
     data_dir: ${oc.env:AMPLFI_DATADIR}
-    inference_params: ["frequency", "quality", "hrss", "phase", "eccentricity", "dec", "psi", "phi"]
+    inference_params: ["dec", "psi", "phi"]
     highpass: 25
     sample_rate: 2048
     kernel_length: 5
@@ -96,5 +96,5 @@ data:
             low: 0
             high: 6.28318
             validate_args: false
-        num_val_waveforms: 10000
+        num_val_waveforms: 1
         num_test_waveforms: 1000

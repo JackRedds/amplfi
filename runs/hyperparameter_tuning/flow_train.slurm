@@ -9,18 +9,18 @@
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --mem=192G
 #SBATCH --mail-type=END
 #SBATCH --mail-user=redep028@umn.edu
 
-RUN_TYPE="sg_sky_loc"
+RUN_TYPE="multi_sg"
 export PROJECT_DIR=/projects/bcse/jredepenning/
 export AMPLFI_CONTAINER_ROOT=/scratch/bcse/jredepenning/
-export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/run5/${RUN_TYPE}
+export AMPLFI_OUTDIR=$PROJECT_DIR/amplfi-outdir/sg_runs/${RUN_TYPE}
 export AMPLFI_CONDORDIR=$AMPLFI_OUTDIR/condor
 
 # export AMPLFI_DATADIR=/projects/bcse/deep1018/amplfi-data-dir-O3
-export AMPLFI_DATADIR=$PROJECT_DIR/amplfi-data-dir-O3b-HLV_small
+export AMPLFI_DATADIR=/projects/bcse/jredepenning/gwak2_background
 export FLOW_CONFIG=$PROJECT_DIR/amplfi/runs/${RUN_TYPE}/sg.yaml
 
 # launch training pipeline

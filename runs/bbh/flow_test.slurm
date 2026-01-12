@@ -5,7 +5,7 @@
 #SBATCH --output=/scratch/bcse/saggarwal/run1/%x.out
 #SBATCH --error=/scratch/bcse/saggarwal/run1/%x.err
 #SBATCH --time=6:00:00
-#SBATCH --partition=gpuA100x8
+#SBATCH --partition=gpuA100x4
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4

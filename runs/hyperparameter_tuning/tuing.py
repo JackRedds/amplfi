@@ -11,8 +11,9 @@ from torch.utils.data import DataLoader
 
 device = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
 
-config_path = "/projects/bcse/jredepenning/amplfi/runs/sg_sky_loc/sg.yaml"
-ckpt_path = "/projects/bcse/jredepenning/amplfi-outdir/run5/sg_sky_loc/train_logs/best.ckpt"
+run_type = "multi_sg"
+config_path = f"/projects/bcse/jredepenning/amplfi/runs/{run_type}/sg.yaml"
+ckpt_path = f"/projects/bcse/jredepenning/amplfi-outdir/sg_runs/{run_type}/train_logs/best.ckpt"
 
 
 
@@ -46,18 +47,20 @@ def objective(trial):
     #   hidden_size: 32 -> 1024
     # cli.model.hparams['arch']['init_args']['hidden_features']
 
-    
-    batch_size_choices = [128, 256, 512]
-    batches_per_epoch_choices = [100, 150, 200]
-    batch_size = trial.suggest_categorical("batch_size", batch_size_choices)
-    batches_per_epoch = trial.suggest_categorical("batches_per_epoch", batches_per_epoch_choices)
-    learning_rate = trial.suggest_float("learning_rate", 7.14e-4, 7.14e-2, log=True)
-    # weight_decay = trial.suggest_float("weight_decay", 4.2e-4, 4.2e-2, log=True)
+    learning_rate = [1e-4, 3e-4, 1e-3]
+    transforms = [12, 16, 20]
+    hidden_features = [[256,256,256], [512,512,512]]
+    weight_decay = [0.0, 4e-4]
 
-    # batch_size = 256
-    # learning_rate = 7.14e-3
-    weight_decay = 4.2e-3
-    # batches_per_epoch = 120
+    # Refinement
+    # pct_start = [0.1, 0.2, 0.3]
+    # freq_context_dim = [128, 256]
+    # time_context_dim = [8, 16]
+ 
+    learning_rate = trial.suggest_categorical("learning_rate", learning_rate)
+    transforms = trial.suggest_categorical("transforms", transforms)
+    hidden_features = trial.suggest_categorical("hidden_features", hidden_features)
+    weight_decay = trial.suggest_categorical("weight_decay", weight_decay)
 
     cli = AmplfiFlowCLI(
         AmplfiModel,
@@ -75,7 +78,7 @@ def objective(trial):
 
     early_stop_callback = EarlyStopping(
         monitor='valid_loss',
-        patience=10,
+        patience=30,
         verbose=False,
         mode='min'
     )
@@ -93,8 +96,8 @@ def objective(trial):
     # trainer.max_epochs = max_epochs
     model.hparams["learning_rate"] = learning_rate
     model.hparams["weight_decay"] = weight_decay
-    datamodule.hparams["batch_size"] = batch_size
-    datamodule.hparams["batches_per_epoch"] = batches_per_epoch
+    model.hparams["hidden_features"] = hidden_features
+    model.hparams["transforms"] = transforms
 
     train_dataloader, val_dataloader = prepare_data(datamodule)
     trainer.fit(model, train_dataloader, val_dataloader)
@@ -102,7 +105,7 @@ def objective(trial):
     return trainer.callback_metrics['valid_loss'].item()
 
 if __name__ == '__main__':
-    n_trials = 10
+    n_trials = 20
     study = optuna.create_study(direction='minimize')
     study.optimize(objective, n_trials=n_trials)
     
