@@ -115,15 +115,15 @@ class FlowModel(AmplfiModel):
         strain, asds, parameters, _ = batch
         context = (strain, asds)
         loss = self(context, parameters).mean()
-        # self.log(
-        #     "train_loss",
-        #     loss,
-        #     on_step=True,
-        #     on_epoch=True,
-        #     prog_bar=True,
-        #     sync_dist=True,
-        #     logger=True,
-        # )
+        #self.log(
+        #    "train_loss",
+        #    loss,
+        #    on_step=True,
+        #    on_epoch=True,
+        #    prog_bar=True,
+        #    sync_dist=True,
+        #    logger=True,
+        #)
         return loss
 
     def validation_step(self, batch, _):
