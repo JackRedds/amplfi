@@ -4,4 +4,6 @@
 **/*.env
 **/*.sif
 **/*.hdf5
+runs/
+notebooks/
 _build

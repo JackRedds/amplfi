@@ -181,7 +181,7 @@ class FlowModel(AmplfiModel):
 
         result = self.cast_as_bilby_result(
             descaled.cpu().numpy(),
-            log_probs.cpu().numpy(),
+            log_probs.cpu().detach().numpy(),
             injection_parameters,
         )
 
