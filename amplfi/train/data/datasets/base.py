@@ -396,12 +396,14 @@ class AmplfiDataset(pl.LightningDataModule):
             self.val_background = self.load_val_background(cross.shape[0])
             self._logger.info(f"Loaded {len(cross)} waveforms for validation")
             params = []
+            # why is sky location not included in the parameters
             for k in self.hparams.inference_params:
                 if k in parameters.keys():
                     params.append(torch.Tensor(parameters[k]))
 
+            self.val_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
+            self.val_parameters: dict[str, torch.tensor] = parameters
             self.val_waveforms = torch.stack([cross, plus], dim=0)
-            self.val_parameters = torch.column_stack(params)
 
         elif stage == "test":
             (
@@ -417,7 +419,7 @@ class AmplfiDataset(pl.LightningDataModule):
                 if k in parameters.keys():
                     params.append(torch.Tensor(parameters[k]))
 
-            self.test_inference_params = torch.column_stack(params)
+            self.test_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
             self.test_parameters: dict[str, torch.tensor] = parameters
             self.test_waveforms = torch.stack([cross, plus], dim=0)
 
@@ -539,7 +541,7 @@ class AmplfiDataset(pl.LightningDataModule):
         # build waveform dataloader
         cross, plus = self.val_waveforms
         waveform_dataset = torch.utils.data.TensorDataset(
-            cross, plus, self.val_parameters
+            cross, plus, self.val_inference_params
         )
         waveform_dataloader = torch.utils.data.DataLoader(
             waveform_dataset,
