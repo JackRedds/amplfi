@@ -1,5 +1,7 @@
 from typing import Callable
 
+from numpy import cross
+
 import torch
 from ml4gw.waveforms.generator import TimeDomainCBCWaveformGenerator
 
@@ -55,8 +57,21 @@ class CBCGenerator(WaveformGenerator):
             right_pad + self.fduration / 2,
         )
 
+    def center_waveforms(self, hc, hp):
+        hc_centered = torch.zeros_like(hc)
+        hp_centered = torch.zeros_like(hp)
+        N = hc.shape[1]
+        num_waveforms = hc.shape[0]
+        idx_peak = torch.argmax(torch.abs(hc), dim=1)
+        shift = N//2 - idx_peak
+        for i in range(num_waveforms):
+            hc_centered[i] = torch.roll(hc[i], shift[i].item())
+            hp_centered[i] = torch.roll(hp[i], shift[i].item())
+        return hc_centered, hp_centered
+
     def forward(self, **parameters) -> torch.Tensor:
         hc, hp = self.waveform_generator(**parameters)
+        hc, hp = self.center_waveforms(hc, hp)
         waveforms = torch.stack([hc, hp], dim=1)
         if self.time_translator is not None:
             waveforms = self.time_translator(waveforms)

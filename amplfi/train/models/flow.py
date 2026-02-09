@@ -203,7 +203,7 @@ class FlowModel(AmplfiModel):
         log_probs = log_probs[mask]
         result = self.cast_as_bilby_result(
             descaled.cpu().numpy(),
-            log_probs.cpu().numpy(),
+            log_probs.cpu().detach().numpy(),
             None,
         )
 
