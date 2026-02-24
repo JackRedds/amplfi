@@ -25,7 +25,7 @@ class SGGenerator(WaveformGenerator):
 
 
 class MultiSGGenerator(WaveformGenerator):
-    def __init__(self, max_shift: float = 1e-3, *args, **kwargs):
+    def __init__(self, max_shift: float = 1e-2, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.multi_sg = SineGaussian(self.sample_rate, self.duration)
         self.max_shift = max_shift
