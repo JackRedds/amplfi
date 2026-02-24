@@ -93,6 +93,7 @@ class MultiSGParameterSampler(ParameterSampler):
         device: str = "cpu",
     ):
         rand_int = self.n_sg.sample((N,)).to(device).long()
+        rand_int = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
         # sample parameters from prior
         waveform_parameters = {
             f"{i}": {
