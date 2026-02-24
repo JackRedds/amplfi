@@ -69,6 +69,7 @@ class MultiSGParameterSampler(ParameterSampler):
         self,
         parameters: dict[str, torch.distributions.Distribution],
         conversion_function: Optional[Callable] = None,
+        n_sg: torch.distributions.Distribution = torch.distributions.Uniform(1, 10),
     ):
         """
         A class for sampling parameters from a prior distribution
@@ -84,14 +85,14 @@ class MultiSGParameterSampler(ParameterSampler):
         """
         self.parameters = parameters
         self.conversion_function = conversion_function or (lambda x: x)
+        self.n_sg = n_sg
 
     def __call__(
         self,
         N: int,
-        n_max: int = 10,
         device: str = "cpu",
     ):
-        rand_int = torch.randint(1, n_max + 1, (N,), device=device)
+        rand_int = self.n_sg.sample((N,)).to(device).long()
         # sample parameters from prior
         waveform_parameters = {
             f"{i}": {
