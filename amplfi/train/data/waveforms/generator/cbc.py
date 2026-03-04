@@ -71,7 +71,7 @@ class CBCGenerator(WaveformGenerator):
 
     def forward(self, **parameters) -> torch.Tensor:
         hc, hp = self.waveform_generator(**parameters)
-        hc, hp = self.center_waveforms(hc, hp)
+        # hc, hp = self.center_waveforms(hc, hp)
         waveforms = torch.stack([hc, hp], dim=1)
         if self.time_translator is not None:
             waveforms = self.time_translator(waveforms)
