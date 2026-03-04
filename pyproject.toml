@@ -59,7 +59,7 @@ default-groups = [
 ]
 
 [tool.uv.sources]
-ml4gw = { git = "https://github.com/ML4GW/ml4gw.git" }
+ml4gw = { git = "https://github.com/JackRedds/ml4gw.git" }
 
 [build-system]
 requires = ["hatchling"]
