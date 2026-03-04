@@ -69,7 +69,6 @@ class MultiSGParameterSampler(ParameterSampler):
         self,
         parameters: dict[str, torch.distributions.Distribution],
         conversion_function: Optional[Callable] = None,
-        n_sg: torch.distributions.Distribution = torch.distributions.Uniform(1, 10),
     ):
         """
         A class for sampling parameters from a prior distribution
@@ -83,9 +82,11 @@ class MultiSGParameterSampler(ParameterSampler):
                 A callable that takes a dictionary of sampled parameters
                 and returns a dictionary of waveform generation parameters
         """
-        self.parameters = parameters
+        self.n_sg = parameters["n_sg"]
+        self.parameters = {
+            k: v for k, v in parameters.items() if k != "n_sg"
+        }
         self.conversion_function = conversion_function or (lambda x: x)
-        self.n_sg = n_sg
 
     def __call__(
         self,
