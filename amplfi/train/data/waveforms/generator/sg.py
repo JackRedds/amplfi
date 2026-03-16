@@ -33,25 +33,25 @@ class MultiSGGenerator(WaveformGenerator):
         num_waveforms = self.num_val_waveforms // world_size
         parameters = self.parameter_sampler(num_waveforms, device="cpu")
         hc, hp = self(**parameters)
-        parameters = self.ave_parameters(parameters)
+        parameters = self.multi_sg.ave_parameters(parameters)
         return hc, hp, parameters
 
     def get_test_waveforms(self):
         parameters = self.test_parameter_sampler(self.num_test_waveforms)
         hc, hp = self(**parameters)
-        parameters = self.ave_parameters(parameters)
+        parameters = self.multi_sg.ave_parameters(parameters)
         return hc, hp, parameters
 
     def sample(self, X):
         N = len(X)
         parameters = self.parameter_sampler(N, device=X.device)
         hc, hp = self(**parameters)
-        parameters = self.ave_parameters(parameters)
+        parameters = self.multi_sg.ave_parameters(parameters)
         return hc, hp, parameters
 
     def fit_scaler(self, scaler: "ChannelWiseScaler") -> "ChannelWiseScaler":
         parameters = self.parameter_sampler(self.num_fit_params)
-        parameters = self.ave_parameters(parameters)
+        parameters = self.multi_sg.ave_parameters(parameters)
 
         dec, psi, phi = self.sample_extrinsic(torch.ones(self.num_fit_params))
         parameters.update({"dec": dec, "psi": psi, "phi": phi})
