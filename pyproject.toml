@@ -10,8 +10,8 @@ requires-python = ">=3.10,<3.13"
 dependencies = [
     "lightray>=0.2.4",
     "numpy<2.0.0",
-    "ml4gw>=0.7.1",
-    "lightning==2.5.0",
+    "ml4gw>=0.7.9",
+    "lightning>=2.5.0",
     "h5py>=3.10.0,<4",
     "ray[default, tune]>=2.38.0,<3",
     "bilby>=2.2.3,<3",

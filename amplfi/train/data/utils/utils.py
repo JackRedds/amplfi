@@ -103,13 +103,6 @@ class MultiSGParameterSampler(ParameterSampler):
             for i in range(N)
         }
 
-        # for i in range(N):
-            # waveform_parameters.update(self.conversion_function(waveform_parameters[f"{i}"]))
-
-        # perform any necessary conversions
-        # to from sampled parameters to
-        # waveform generation parameters
-
         return waveform_parameters
 
 
