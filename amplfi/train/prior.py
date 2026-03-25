@@ -64,6 +64,33 @@ class AmplfiPrior:
         return log_probs
 
 
+class AmplfiMultiSGPrior(AmplfiPrior):
+    def __init__(self, priors, conversion_function = None):
+        self.n_sg = priors["n_sg"]
+        priors = {
+            k: v for k, v in priors.items() if k != "n_sg"
+        }
+        super().__init__(priors, conversion_function)
+
+
+    def __call__(
+        self,
+        N: int,
+        device: str = "cpu",
+    ) -> dict[str, torch.Tensor]:
+        rand_int = self.n_sg.sample((N,)).to(device).long()
+        rand_int = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
+        # sample parameters from prior
+        parameters = {
+            f"{i}": {
+                k: v.sample((rand_int[i],)).to(device) for k, v in self.parameters.items()
+            }
+            for i in range(N)
+        }
+
+        return parameters
+    
+
 class ParameterTransformer(torch.nn.Module):
     """
     Helper class for applying preprocessing
