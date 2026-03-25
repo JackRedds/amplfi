@@ -4,6 +4,8 @@
 **/*.env
 **/*.sif
 **/*.hdf5
+amplfi.egg-info
+build
 runs/
 notebooks/
 _build
