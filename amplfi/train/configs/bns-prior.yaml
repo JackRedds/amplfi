@@ -6,20 +6,21 @@ init_args:
     chirp_mass: 
       class_path: torch.distributions.Uniform
       init_args:
-        low: 10
-        high: 100
+        low: 1
+        high: 3
         validate_args: false
     mass_ratio: 
       class_path: torch.distributions.Uniform
       init_args:
-        low: 0.125 
+        low: 0.5 
         high: 0.999
         validate_args: false
     distance: 
-      class_path: torch.distributions.Uniform
+      class_path: ml4gw.distributions.UniformComovingVolume
       init_args:
-        low:  100 
-        high: 3100 
+        minimum:  10 
+        maximum: 500 
+        distance_type: "luminosity_distance"
         validate_args: false
     inclination: 
       class_path: ml4gw.distributions.Sine
@@ -37,13 +38,13 @@ init_args:
       class_path: torch.distributions.Uniform
       init_args:
         low: 0.0 
-        high: 0.999
+        high: 0.4
         validate_args: false
     a_2: 
       class_path: torch.distributions.Uniform
       init_args:
         low: 0.0 
-        high: 0.999
+        high: 0.4
         validate_args: false
     tilt_1: 
       class_path: torch.distributions.Uniform

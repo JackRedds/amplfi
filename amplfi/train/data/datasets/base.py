@@ -12,11 +12,13 @@ from ml4gw.transforms import ChannelWiseScaler, Whiten
 from ...augmentations import PsdEstimator, WaveformProjector
 from ..utils import fs as fs_utils
 from ..utils.utils import ZippedDataset
+from amplfi.train.prior import ParameterTransformer
 from ..waveforms.sampler import WaveformSampler
 import numpy as np
 from pathlib import Path
 import random
 from tqdm.auto import tqdm
+import pandas as pd
 
 Tensor = torch.Tensor
 Distribution = torch.distributions.Distribution
@@ -39,6 +41,12 @@ class AmplfiDataset(pl.LightningDataModule):
         inference_params:
             List of parameters to perform inference on. Can be a subset
             of the parameters that fully describes the waveforms
+        dec:
+            The distribution of declinations to sample from
+        psi:
+            The distribution of polarization angles to sample from
+        phi:
+            The distribution of "right ascensions" to sample from
         highpass:
             Highpass frequency in Hz
         sample_rate:
@@ -63,6 +71,10 @@ class AmplfiDataset(pl.LightningDataModule):
             for training, validation and testing.
             See `train.data.waveforms.sampler`
             for methods this object should define.
+        parameter_transformer:
+            A `ParameterTransformer` object that applies any
+            additional transformations to parameters before
+            they are scaled and passed to the neural network.
         train_val_range:
             Tuple of gpstimes that specify time range of
             training and validation data.
@@ -90,6 +102,9 @@ class AmplfiDataset(pl.LightningDataModule):
         self,
         data_dir: str,
         inference_params: list[str],
+        dec: Distribution,
+        psi: Distribution,
+        phi: Distribution,
         highpass: float,
         sample_rate: float,
         kernel_length: float,
@@ -99,6 +114,7 @@ class AmplfiDataset(pl.LightningDataModule):
         batch_size: int,
         ifos: List[str],
         waveform_sampler: WaveformSampler,
+        parameter_transformer: Optional[ParameterTransformer] = None,
         fftlength: Optional[int] = None,
         train_val_range: Optional[tuple[float, float]] = None,
         test_range: Optional[tuple[float, float]] = None,
@@ -118,6 +134,9 @@ class AmplfiDataset(pl.LightningDataModule):
         self.init_logging(verbose)
         self.waveform_sampler = waveform_sampler
         self.max_num_workers = max_num_workers
+
+        self.dec, self.psi, self.phi = dec, psi, phi
+        self.parameter_transformer = parameter_transformer or (lambda x: x)
 
         # generate our local node data directory
         # if our specified data source is remote
@@ -182,7 +201,7 @@ class AmplfiDataset(pl.LightningDataModule):
         and performing training/inference.
         For example, taking logarithm of hrss
         """
-        return self.waveform_sampler.parameter_transformer(parameters)
+        return self.parameter_transformer(parameters)
 
     def scale(self, parameters, reverse: bool = False):
         """
@@ -349,17 +368,44 @@ class AmplfiDataset(pl.LightningDataModule):
         # parameters to fit the scaler.
         # Only fit the scaler during training.
         # During testing, use pre-fit parameters
-        if stage in ["predict", "test"]:
+        if stage in ["predict", "test"] and self.trainer.model.scaler.built:
             self._logger.info("Using pre-fit standard scaler")
             self.scaler = self.trainer.model.scaler
         else:
             self._logger.info("Fitting standard scaler to parameters")
-            scaler = ChannelWiseScaler(self.num_params)
-            self.scaler = self.waveform_sampler.fit_scaler(scaler)
+            self.scaler = self.fit_scaler()
 
         self.projector = WaveformProjector(
             self.hparams.ifos, self.hparams.sample_rate
         )
+
+    def sample_extrinsic(self, X: torch.Tensor):
+        """
+        Sample extrinsic parameters used to project waveforms
+        """
+        N = len(X)
+        dec = self.dec.sample((N,)).to(X.device)
+        psi = self.psi.sample((N,)).to(X.device)
+        phi = self.phi.sample((N,)).to(X.device)
+        return dec, psi, phi
+
+    def fit_scaler(self):
+        scaler = ChannelWiseScaler(self.num_params)
+        parameters = self.waveform_sampler.get_fit_parameters()
+        key = list(parameters.keys())[0]
+        dec, psi, phi = self.sample_extrinsic(parameters[key])
+        parameters["dec"] = dec
+        parameters["psi"] = psi
+        parameters["phi"] = phi
+
+        transformed = self.parameter_transformer(parameters)
+        fit = []
+        for key in self.hparams.inference_params:
+            fit.append(transformed[key])
+
+        fit = torch.row_stack(fit)
+        scaler.fit(fit)
+        return scaler
 
     def setup(self, stage: str) -> None:
         world_size, rank = self.get_world_size_and_rank()
@@ -390,6 +436,7 @@ class AmplfiDataset(pl.LightningDataModule):
         # modules are all still on CPU.
         # get_val_waveforms should be implemented by waveform_sampler object
         if stage in ["fit", "validate"]:
+            self._logger.info("Loading waveforms for validation")
             cross, plus, parameters = self.waveform_sampler.get_val_waveforms(
                 rank, world_size
             )
@@ -420,7 +467,8 @@ class AmplfiDataset(pl.LightningDataModule):
                     params.append(torch.Tensor(parameters[k]))
 
             self.test_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
-            self.test_parameters: dict[str, torch.tensor] = parameters
+            self.test_parameters = pd.DataFrame(parameters)
+            self.test_extrinsic = {key: [] for key in ["dec", "psi", "phi"]}
             self.test_waveforms = torch.stack([cross, plus], dim=0)
 
         # once we've generated validation/testing waveforms on cpu,
@@ -441,7 +489,7 @@ class AmplfiDataset(pl.LightningDataModule):
             background.append(data)
         return background
 
-    def load_val_background(self, N: int) -> List[Tensor]:
+    def load_val_background(self, N: int) -> list[Tensor]:
         """
         Sample `N` background segments from the set of validation files.
         """
@@ -456,7 +504,9 @@ class AmplfiDataset(pl.LightningDataModule):
         background = next(iter(dataset))
         return background
 
-    def on_after_batch_transfer(self, batch, _):
+    def on_after_batch_transfer(
+        self, batch, _
+    ) -> tuple[Tensor, Tensor, dict[str, Tensor], Tensor]:
         """
         This is a Lightning `hook` that gets called after
         data returned by a dataloader gets put on the local device,
@@ -495,7 +545,6 @@ class AmplfiDataset(pl.LightningDataModule):
             strain, asds, parameters, snrs = self.inject(
                 background, cross, plus, parameters
             )
-
         return strain, asds, parameters, snrs
 
     # ================================================ #
@@ -605,7 +654,13 @@ class AmplfiDataset(pl.LightningDataModule):
             background_dataloader,
         )
 
-    def inject(self, *args, **kwargs):
+    def inject(
+        self,
+        X: Tensor,
+        cross: Tensor,
+        plus: Tensor,
+        parameters: dict[str, Tensor],
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """
         Subclasses should implement this method
         for different training use cases,
@@ -616,7 +671,10 @@ class AmplfiDataset(pl.LightningDataModule):
         raise NotImplementedError
 
     def background_from_gpstimes(
-        self, gpstimes: np.ndarray, fnames: List[Path]
+        self,
+        gpstimes: np.ndarray,
+        fnames: List[Path],
+        use_random_segment: bool = True,
     ) -> torch.Tensor:
         """
         Construct a Tensor of background segments corresponding
@@ -626,6 +684,7 @@ class AmplfiDataset(pl.LightningDataModule):
 
         # load in background segments corresponding to gpstimes
         background = []
+        analyzed_gpstimes = []
         segments = [
             tuple(map(float, f.name.split(".")[0].split("-")[1:]))
             for f in fnames
@@ -667,28 +726,35 @@ class AmplfiDataset(pl.LightningDataModule):
             file, start = find_file(time)
             # if none exists, use random segment
             if file is None:
-                self._logger.info(
-                    "No segment in testing directory containing "
-                    f"{time}. Using random segment"
-                )
-                file = random.choice()
-                start, length = list(
-                    map(float, file.name.split(".")[0].split("-")[1:])
-                )
-                time = start + random.randint(
-                    -int(pre),
-                    int(length - post),
-                )
+                if use_random_segment:
+                    self._logger.info(
+                        "No segment in testing directory containing "
+                        f"{time}. Using random segment"
+                    )
+                    file = random.choice(fnames)
+                    start, length = list(
+                        map(float, file.name.split(".")[0].split("-")[1:])
+                    )
+                    time = start + random.randint(
+                        -int(pre // 1),
+                        int(length - post),
+                    )
+                else:
+                    self._logger.info(
+                        "No segment in testing directory containing "
+                        f"{time}. Not analyzing"
+                    )
+                    continue
 
+            analyzed_gpstimes.append(time)
             # convert from time to index in file
             middle_idx = int((time - start) * self.hparams.sample_rate)
             start_idx = middle_idx + num_pre
             end_idx = middle_idx + num_post
-
             with h5py.File(file) as f:
                 for ifo in self.hparams.ifos:
                     strain.append(f[ifo][start_idx:end_idx])
                 strain = np.stack(strain, axis=0)
                 background.append(strain)
         background = np.stack(background, axis=0)
-        return torch.tensor(background)
+        return torch.tensor(background), analyzed_gpstimes
