@@ -83,7 +83,7 @@ class AmplfiMultiSGPrior(AmplfiPrior):
         # sample parameters from prior
         parameters = {
             f"{i}": {
-                k: v.sample((rand_int[i],)).to(device) for k, v in self.parameters.items()
+                k: v.sample((rand_int[i],)).to(device) for k, v in self.priors.items()
             }
             for i in range(N)
         }
