@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "lightray>=0.2.4",
-    "numpy<2.0.0",
+    "numpy>=1.26.0,<2.0.0",
     "ml4gw @ git+https://github.com/JackRedds/ml4gw.git",
     "lightning>=2.5.0",
     "h5py>=3.10.0,<4",
