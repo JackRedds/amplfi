@@ -218,9 +218,11 @@ class PlotSkymap(pl.Callback):
         self,
         max_samples_per_pixel: int = 20,
         min_samples_per_pix_dist: int = 5,
+        use_distance: bool = False,
     ):
         self.max_samples_per_pixel = max_samples_per_pixel
         self.min_samples_per_pix_dist = min_samples_per_pix_dist
+        self.use_distance = use_distance
 
     def _plot_skymap(
         self,
@@ -231,6 +233,7 @@ class PlotSkymap(pl.Callback):
         skymap = result.to_skymap(
             max_samples_per_pixel=self.max_samples_per_pixel,
             min_samples_per_pix_dist=self.min_samples_per_pix_dist,
+            use_distance=self.use_distance,
         )
         ra = result.injection_parameters["ra"]
         dec = result.injection_parameters["dec"]
@@ -362,9 +365,11 @@ class SaveFITS(pl.Callback):
         self,
         min_samples_per_pix_dist: int = 5,
         max_samples_per_pixel: int = 20,
+        use_distance: bool = False,
     ):
         self.min_samples_per_pix_dist = min_samples_per_pix_dist
         self.max_samples_per_pixel = max_samples_per_pixel
+        self.use_distance = use_distance
 
     def save_fits(
         self,
@@ -372,7 +377,7 @@ class SaveFITS(pl.Callback):
         outdir: Path,
     ):
         skymap = result.to_skymap(
-            use_distance=True,
+            use_distance=self.use_distance,
             min_samples_per_pix_dist=self.min_samples_per_pix_dist,
             max_samples_per_pixel=self.max_samples_per_pixel,
         )
@@ -528,13 +533,14 @@ def crossmatch_skymap(
     min_samples_per_pix_dist: int,
     max_samples_per_pixel: int,
     contours: tuple[float],
+    use_distance: bool = False,
 ):
     """
     Function to process each skymap and calculate crossmatch statistics.
     """
 
     crossmatch_result = result.to_crossmatch_result(
-        use_distance=True,
+        use_distance=use_distance,
         min_samples_per_pix_dist=min_samples_per_pix_dist,
         max_samples_per_pixel=max_samples_per_pixel,
         contours=contours,
@@ -567,11 +573,13 @@ class CrossMatchStatistics(pl.Callback):
         self,
         min_samples_per_pix_dist: int = 5,
         max_samples_per_pixel: int = 20,
-        contours: tuple[float] = (0.5, 0.9),
+        contours: tuple[float, ...] = (0.5, 0.9),
+        use_distance: bool = False,
     ):
         self.contours = contours
         self.min_samples_per_pix_dist = min_samples_per_pix_dist
         self.max_samples_per_pixel = max_samples_per_pixel
+        self.use_distance = use_distance
 
     def write_skymap_statistics(
         self,
@@ -622,6 +630,7 @@ class CrossMatchStatistics(pl.Callback):
             min_samples_per_pix_dist=min_samples_per_pix_dist,
             max_samples_per_pixel=max_samples_per_pixel,
             contours=self.contours,
+            use_distance=self.use_distance,
         )
 
         crossmatch_results: list["CrossmatchResult"] = [None] * len(results)
