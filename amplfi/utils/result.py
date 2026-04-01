@@ -17,7 +17,7 @@ class AmplfiResult(bilby.result.Result):
 
     def to_crossmatch_result(
         self,
-        use_distance: bool = True,
+        use_distance: bool = False,
         min_samples_per_pix_dist: int = 5,
         **kwargs,
     ) -> CrossmatchResult:
@@ -32,16 +32,23 @@ class AmplfiResult(bilby.result.Result):
             use_distance=use_distance,
             min_samples_per_pix_dist=min_samples_per_pix_dist,
         )
+        if use_distance:
+            coordinates = SkyCoord(
+                self.injection_parameters["ra"] * u.rad,
+                self.injection_parameters["dec"] * u.rad,
+                distance=self.injection_parameters["distance"] * u.Mpc,
+            )
 
-        coordinates = SkyCoord(
-            self.injection_parameters["ra"] * u.rad,
-            self.injection_parameters["dec"] * u.rad,
-            distance=self.injection_parameters["distance"] * u.Mpc,
-        )
+        else:
+            coordinates = SkyCoord(
+                self.injection_parameters["ra"] * u.rad,
+                self.injection_parameters["dec"] * u.rad,
+            )
+            
         return crossmatch(skymap, coordinates, contours=(50, 90))
 
     def to_skymap(
-        self, use_distance: bool = True, adaptive: bool = True, **kwargs
+        self, use_distance: bool = False, adaptive: bool = True, **kwargs
     ) -> Table:
         """
         Calculate a histogram skymap from posterior samples
