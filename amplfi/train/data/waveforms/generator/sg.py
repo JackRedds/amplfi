@@ -29,36 +29,36 @@ class MultiSGGenerator(WaveformGenerator):
         super().__init__(*args, **kwargs)
         self.multi_sg = MultiSineGaussian(self.sample_rate, self.duration)
 
-    def get_val_waveforms(
-        self, _, world_size
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-        num_waveforms = self.num_val_waveforms // world_size
-        parameters = self.training_prior(num_waveforms, device="cpu")
-        hc, hp = self(**parameters)
-        parameters = self.multi_sg.ave_parameters(parameters)
-        return hc, hp, parameters
+    # def get_val_waveforms(
+    #     self, _, world_size
+    # ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    #     num_waveforms = self.num_val_waveforms // world_size
+    #     parameters = self.training_prior(num_waveforms, device="cpu")
+    #     hc, hp = self(**parameters)
+    #     parameters = self.multi_sg.ave_parameters(parameters)
+    #     return hc, hp, parameters
 
-    def get_test_waveforms(
-        self,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-        parameters = self.testing_prior(self.num_test_waveforms)
-        hc, hp = self(**parameters)
-        parameters = self.multi_sg.ave_parameters(parameters)
-        return hc, hp, parameters
+    # def get_test_waveforms(
+    #     self,
+    # ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    #     parameters = self.testing_prior(self.num_test_waveforms)
+    #     hc, hp = self(**parameters)
+    #     parameters = self.multi_sg.ave_parameters(parameters)
+    #     return hc, hp, parameters
 
-    def sample(
-        self, X
-    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-        N = len(X)
-        parameters = self.training_prior(N, device=X.device)
-        hc, hp = self(**parameters)
-        parameters = self.multi_sg.ave_parameters(parameters)
-        return hc, hp, parameters
+    # def sample(
+    #     self, X
+    # ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    #     N = len(X)
+    #     parameters = self.training_prior(N, device=X.device)
+    #     hc, hp = self(**parameters)
+    #     parameters = self.multi_sg.ave_parameters(parameters)
+    #     return hc, hp, parameters
 
-    def get_fit_parameters(self) -> torch.Tensor:
-        parameters = self.training_prior(self.num_fit_params)
-        parameters = self.multi_sg.ave_parameters(parameters)
-        return parameters
+    # def get_fit_parameters(self) -> torch.Tensor:
+    #     parameters = self.training_prior(self.num_fit_params)
+    #     parameters = self.multi_sg.ave_parameters(parameters)
+    #     return parameters
 
     def slice_waveforms(self, waveforms: torch.Tensor, waveform_size: int):
         # for sine gaussians, place waveform in center of kernel

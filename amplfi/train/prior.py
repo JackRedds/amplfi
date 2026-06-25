@@ -64,12 +64,9 @@ class AmplfiPrior:
         return log_probs
 
 
-class AmplfiMultiSGPrior(AmplfiPrior):
-    def __init__(self, priors, conversion_function = None):
-        self.n_sg = priors["n_sg"]
-        priors = {
-            k: v for k, v in priors.items() if k != "n_sg"
-        }
+class AmplfiMultiWFPrior(AmplfiPrior):
+    def __init__(self, n_wf, priors, conversion_function = None):
+        self.n_wf = n_wf
         super().__init__(priors, conversion_function)
 
 
@@ -78,18 +75,19 @@ class AmplfiMultiSGPrior(AmplfiPrior):
         N: int,
         device: str = "cpu",
     ) -> dict[str, torch.Tensor]:
-        rand_int = self.n_sg.sample((N,)).to(device).long()
-        rand_int = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
+        rand_int = self.n_wf.sample((N,)).to(device).long()
+        n_wavelets = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
+        n_max = n_wavelets.max()
+        mask = torch.arange(n_max).expand(N, n_max) < n_wavelets.unsqueeze(1)
+        
         # sample parameters from prior
         parameters = {
-            f"{i}": {
-                k: v.sample((rand_int[i],)).to(device) for k, v in self.priors.items()
-            }
-            for i in range(N)
+            k: v.sample((N, n_max)).to(device) * mask for k, v in self.priors.items()
         }
 
+        parameters = self.conversion_function(parameters)
         return parameters
-    
+
 
 class ParameterTransformer(torch.nn.Module):
     """
