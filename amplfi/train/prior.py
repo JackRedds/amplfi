@@ -65,8 +65,9 @@ class AmplfiPrior:
 
 
 class AmplfiMultiWFPrior(AmplfiPrior):
-    def __init__(self, n_wf, priors, conversion_function = None):
+    def __init__(self, n_wf, priors, shared_priors = {}, conversion_function = None):
         self.n_wf = n_wf
+        self.shared_priors = shared_priors
         super().__init__(priors, conversion_function)
 
 
@@ -78,12 +79,22 @@ class AmplfiMultiWFPrior(AmplfiPrior):
         rand_int = self.n_wf.sample((N,)).to(device).long()
         n_wavelets = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
         n_max = n_wavelets.max()
-        mask = torch.arange(n_max).expand(N, n_max) < n_wavelets.unsqueeze(1)
+        mask = (
+            torch.arange(n_max).expand(N, n_max) 
+            < n_wavelets.unsqueeze(1)
+        )
         
-        # sample parameters from prior
-        parameters = {
-            k: v.sample((N, n_max)).to(device) * mask for k, v in self.priors.items()
-        }
+        parameters = {}
+
+        for name, prior in self.priors.items():
+            if name in self.shared_priors:
+                value = prior.sample((N,)).to(device)
+                value = value[:, None].expand(-1, n_max)
+            # else:
+                value = prior.sample((N, n_max)).to(device)
+
+            parameters[name] = value * mask
+
 
         parameters = self.conversion_function(parameters)
         return parameters
