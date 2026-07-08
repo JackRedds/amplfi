@@ -90,7 +90,7 @@ class AmplfiMultiWFPrior(AmplfiPrior):
             if name in self.shared_priors:
                 value = prior.sample((N,)).to(device)
                 value = value[:, None].expand(-1, n_max)
-            # else:
+            else:
                 value = prior.sample((N, n_max)).to(device)
 
             parameters[name] = value * mask
