@@ -12,6 +12,8 @@ From: /sw/external/NGC/pytorch_23.05-py3.sif
 
 python -m pip install --upgrade pip && python -m pip install uv
 
+# base image ships numpy 1.22.2, but scipy needs >=1.23.5; pin it explicitly
+python -m pip install "numpy==1.23.5"
 
 cd /amplfi/ \
     && uv export --format requirements-txt -o requirements.txt.tmp --no-hashes \
