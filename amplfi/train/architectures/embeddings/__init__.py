@@ -4,6 +4,7 @@ from .multimodal import (
     MultiModal,
     MultiModalPsd,
     MultiModalPsdEmbeddingWithDecimator,
+    MultiModalQTransform
 )
 from .resnet import ResNet
 from .similarity import Expander, SimilarityEmbedding
