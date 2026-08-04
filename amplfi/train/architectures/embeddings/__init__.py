@@ -5,5 +5,10 @@ from .multimodal import (
     MultiModalPsd,
     MultiModalPsdEmbeddingWithDecimator,
 )
+from .transformer import (
+    TimeDomainTransformer,
+    MultiModalTransformer,
+    MultiModalPsdTransformer,
+)
 from .resnet import ResNet
 from .similarity import Expander, SimilarityEmbedding
