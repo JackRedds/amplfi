@@ -4,8 +4,88 @@ from ml4gw.nn.norm import NormLayer
 
 import torch
 import torch.nn as nn
+import math
 
 from .base import Embedding
+
+
+class SinusoidalPositionalEncoding(nn.Module):
+    """
+    Sinusoidal positional encoding whose length is determined
+    dynamically from the input.
+
+    Parameters
+    ----------
+    dim:
+        Embedding dimension.
+    """
+
+    def __init__(self, dim: int):
+        super().__init__()
+
+        if dim % 2 != 0:
+            raise ValueError(
+                "Sinusoidal positional encoding requires an even "
+                "embedding dimension."
+            )
+
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        x:
+            Tensor of shape (batch, sequence_length, dim).
+
+        Returns
+        -------
+        Tensor:
+            Input tensor with sinusoidal positional encoding added.
+        """
+
+        batch_size, seq_len, dim = x.shape
+
+        if dim != self.dim:
+            raise ValueError(
+                f"Expected embedding dimension {self.dim}, "
+                f"but got {dim}."
+            )
+
+        # Position indices
+        position = torch.arange(
+            seq_len,
+            device=x.device,
+            dtype=x.dtype,
+        ).unsqueeze(1)
+
+        # Frequencies for each pair of dimensions
+        div_term = torch.exp(
+            torch.arange(
+                0,
+                dim,
+                2,
+                device=x.device,
+                dtype=x.dtype,
+            )
+            * (-math.log(10000.0) / dim)
+        )
+
+        # Shape: (seq_len, dim)
+        pe = torch.zeros(
+            seq_len,
+            dim,
+            device=x.device,
+            dtype=x.dtype,
+        )
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Add batch dimension
+        pe = pe.unsqueeze(0)
+
+        return x + pe
 
 
 class Transformer(nn.Module):
@@ -157,7 +237,9 @@ class Transformer(nn.Module):
         # length isn't necessarily known from the constructor.
         # ---------------------------------------------------------
 
-        self.position_embedding = None
+        self.position_embedding = SinusoidalPositionalEncoding(
+            transformer_dim
+        )
 
     # =============================================================
     # CNN
@@ -300,23 +382,7 @@ class Transformer(nn.Module):
         # Positional embedding
         # ---------------------------------------------------------
 
-        n_tokens = x.shape[1]
-
-        if (
-            self.position_embedding is None
-            or self.position_embedding.shape[1] != n_tokens
-        ):
-            self.position_embedding = nn.Parameter(
-                torch.randn(
-                    1,
-                    n_tokens,
-                    self.transformer_dim,
-                    device=x.device,
-                    dtype=x.dtype,
-                ) * 0.02
-            )
-
-        x = x + self.position_embedding
+        x = self.position_embedding(x)
 
         # ---------------------------------------------------------
         # Transformer
