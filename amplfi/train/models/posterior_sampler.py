@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import torch
-from ..architectures.flows import FlowArchitecture
 from ...utils.result import AmplfiResult
 from .base import AmplfiModel
 from typing import Optional
@@ -22,18 +21,22 @@ if TYPE_CHECKING:
 Tensor = torch.Tensor
 
 
-class FlowModel(AmplfiModel):
+class PosteriorSamplerModel(AmplfiModel):
     """
-    A LightningModule for training normalizing flows
+    Shared LightningModule logic for likelihood-free posterior
+    samplers, i.e. models whose architecture exposes `arch.loss(x,
+    context)` for training and `arch.sample(n, context)` for drawing
+    posterior samples, but (unlike normalizing flows) provide no
+    tractable posterior density. Used as the base class for e.g.
+    `DiffusionModel` and `FlowMatchingModel`.
 
     Args:
         *args:
             See arguments in `amplfi.train.models.base.AmplfiModel`
         arch:
             Neural network architecture to train.
-            This should be a subclass of `FlowArchitecture`.
         filter_params:
-            If `True`, filter the samples produced by the flow
+            If `True`, filter the samples produced by the model
             to keep only valid samples within the prior boundaries.
         samples_per_event:
             Number of samples to draw per event for testing
@@ -51,7 +54,7 @@ class FlowModel(AmplfiModel):
     def __init__(
         self,
         *args,
-        arch: FlowArchitecture,
+        arch: torch.nn.Module,
         filter_params: bool = True,
         samples_per_event: int = 10000,
         min_samples_per_pix_dist: int = 5,
@@ -77,21 +80,12 @@ class FlowModel(AmplfiModel):
         self.save_hyperparameters(ignore=["arch"])
 
     def forward(self, context, parameters) -> Tensor:
-        return -self.model.log_prob(parameters, context=context)
+        return self.model.loss(parameters, context=context)
 
     def training_step(self, batch, _):
         strain, asds, parameters, _ = batch
         context = (strain, asds)
         loss = self(context, parameters).mean()
-        #self.log(
-        #    "train_loss",
-        #    loss,
-        #    on_step=True,
-        #    on_epoch=True,
-        #    prog_bar=True,
-        #    sync_dist=True,
-        #    logger=True,
-        #)
         return loss
 
     def validation_step(self, batch, _):
@@ -149,15 +143,21 @@ class FlowModel(AmplfiModel):
         samples = self.model.sample(
             self.hparams.samples_per_event, context=context
         )
-        log_probs = self.model.log_prob(samples, context)
-
         samples = samples.squeeze(1)
-        log_probs = log_probs.squeeze(1)
 
         descaled = self.scale(samples, reverse=True)
         if self.filter_params:
             descaled, mask = self.filter_parameters(descaled)
-            log_probs = log_probs[mask]
+            num_samples = mask.sum().item()
+        else:
+            num_samples = descaled.shape[0]
+
+        # unlike normalizing flows, these models don't provide a
+        # tractable posterior density, so `log_prob` is left as NaN.
+        # Nothing downstream (pp-plots, crossmatch/skymap statistics,
+        # or prior reweighting, which uses `log_prior` instead) reads
+        # this column.
+        log_probs = np.full(num_samples, np.nan)
 
         # convert samples to dictionary for
         # calculating log probabilites
@@ -204,7 +204,7 @@ class FlowModel(AmplfiModel):
 
         result = self.cast_as_bilby_result(
             descaled.cpu().numpy(),
-            log_probs.cpu().detach().numpy(),
+            log_probs,
             log_prior_of_posterior_samples.cpu().numpy(),
             injection_parameters,
         )
@@ -251,8 +251,9 @@ class FlowModel(AmplfiModel):
                 An array of posterior samples of shape
                 (1, num_samples, num_params)
             log_probs:
-                An array of log probabilities of posterior samples
-                as predicted under the normalizing flow model
+                An array of (NaN) placeholder log probabilities, since
+                these models don't expose a tractable posterior
+                density
             log_prior_probs:
                 An array of log prior probabilities of posterior samples
                 as predicted under the training prior
