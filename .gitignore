@@ -8,5 +8,6 @@ amplfi.egg-info
 build
 runs/
 notebooks/
+uv.lock
 tuning-env/
 _build
