@@ -12,7 +12,10 @@ from .base import Embedding
 class SinusoidalPositionalEncoding(nn.Module):
     """
     Sinusoidal positional encoding whose length is determined
-    dynamically from the input.
+    dynamically from the input. The encoding table is cached
+    and only rebuilt when the required sequence length, device,
+    or dtype changes, since in practice the sequence length is
+    constant across the vast majority of forward calls.
 
     Parameters
     ----------
@@ -30,6 +33,49 @@ class SinusoidalPositionalEncoding(nn.Module):
             )
 
         self.dim = dim
+        self.register_buffer(
+            "pe", torch.zeros(1, 0, dim), persistent=False
+        )
+
+    @torch.no_grad()
+    def _build_pe(
+        self,
+        seq_len: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> None:
+        # Position indices
+        position = torch.arange(
+            seq_len,
+            device=device,
+            dtype=dtype,
+        ).unsqueeze(1)
+
+        # Frequencies for each pair of dimensions
+        div_term = torch.exp(
+            torch.arange(
+                0,
+                self.dim,
+                2,
+                device=device,
+                dtype=dtype,
+            )
+            * (-math.log(10000.0) / self.dim)
+        )
+
+        # Shape: (seq_len, dim)
+        pe = torch.zeros(
+            seq_len,
+            self.dim,
+            device=device,
+            dtype=dtype,
+        )
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Add batch dimension
+        self.pe = pe.unsqueeze(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -44,7 +90,7 @@ class SinusoidalPositionalEncoding(nn.Module):
             Input tensor with sinusoidal positional encoding added.
         """
 
-        batch_size, seq_len, dim = x.shape
+        _, seq_len, dim = x.shape
 
         if dim != self.dim:
             raise ValueError(
@@ -52,40 +98,69 @@ class SinusoidalPositionalEncoding(nn.Module):
                 f"but got {dim}."
             )
 
-        # Position indices
-        position = torch.arange(
-            seq_len,
-            device=x.device,
-            dtype=x.dtype,
-        ).unsqueeze(1)
+        if (
+            self.pe.shape[1] != seq_len
+            or self.pe.device != x.device
+            or self.pe.dtype != x.dtype
+        ):
+            self._build_pe(seq_len, x.device, x.dtype)
 
-        # Frequencies for each pair of dimensions
-        div_term = torch.exp(
-            torch.arange(
-                0,
-                dim,
-                2,
-                device=x.device,
-                dtype=x.dtype,
+        return x + self.pe
+
+
+class _ResidualConvBlock(nn.Module):
+    """
+    Single strided/dilated convolution with a residual shortcut,
+    following the standard ResNet pattern: the identity path is
+    projected with a 1x1 convolution whenever the channel count
+    or stride changes, otherwise it passes through unchanged.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int,
+        dilation: int,
+        groups: int,
+        norm_layer: NormLayer,
+    ):
+        super().__init__()
+
+        padding = ((kernel_size - 1) * dilation) // 2
+
+        self.conv = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            bias=False,
+        )
+        self.norm = norm_layer(out_channels)
+        self.act = nn.GELU()
+
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
+                norm_layer(out_channels),
             )
-            * (-math.log(10000.0) / dim)
-        )
+        else:
+            self.shortcut = nn.Identity()
 
-        # Shape: (seq_len, dim)
-        pe = torch.zeros(
-            seq_len,
-            dim,
-            device=x.device,
-            dtype=x.dtype,
-        )
-
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-
-        # Add batch dimension
-        pe = pe.unsqueeze(0)
-
-        return x + pe
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        identity = self.shortcut(x)
+        out = self.norm(self.conv(x))
+        return self.act(out + identity)
 
 
 class Transformer(nn.Module):
@@ -94,27 +169,24 @@ class Transformer(nn.Module):
 
     Parameters
     ----------
-    num_ifos:
-        Number of interferometers.
-
-    context_dim:
-        Dimension of the final embedding returned to the flow.
+    in_channels:
+        Number of input channels (e.g. number of interferometers).
 
     layers:
-        Number of channels in each convolutional stage.
+        Number of channels in each convolutional stage. Each stage
+        is a residual block: a strided/dilated convolution with a
+        shortcut connection, projected with a 1x1 convolution
+        whenever the channel count or stride changes.
+
+    transformer_dim:
+        Dimension of the tokens fed into the Transformer, and of
+        the final embedding returned to the flow.
 
     kernel_size:
         Kernel size of the convolutional layers.
 
-    zero_init_residual:
-        If True, initialize the final normalization scale of
-        residual blocks to zero.
-
     groups:
         Number of groups used in grouped convolutions.
-
-    width_per_group:
-        Base channel width used to determine the CNN width.
 
     stride_type:
         List specifying whether each CNN stage performs a
@@ -241,6 +313,8 @@ class Transformer(nn.Module):
             transformer_dim
         )
 
+        self.embed_dropout = nn.Dropout(dropout)
+
     # =============================================================
     # CNN
     # =============================================================
@@ -271,29 +345,16 @@ class Transformer(nn.Module):
                     f"Unknown stride_type: {stride_type[i]}"
                 )
 
-            padding = (
-                (kernel_size - 1) * dilation
-            ) // 2
-
             modules.append(
-                nn.Conv1d(
+                _ResidualConvBlock(
                     in_channels,
                     out_channels,
                     kernel_size=kernel_size,
                     stride=stride,
-                    padding=padding,
                     dilation=dilation,
                     groups=groups,
-                    bias=False,
+                    norm_layer=norm_layer,
                 )
-            )
-
-            modules.append(
-                norm_layer(out_channels)
-            )
-
-            modules.append(
-                nn.GELU()
             )
 
             in_channels = out_channels
@@ -383,6 +444,7 @@ class Transformer(nn.Module):
         # ---------------------------------------------------------
 
         x = self.position_embedding(x)
+        x = self.embed_dropout(x)
 
         # ---------------------------------------------------------
         # Transformer
