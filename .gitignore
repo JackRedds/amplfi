@@ -8,4 +8,5 @@ amplfi.egg-info
 build
 runs/
 notebooks/
+tuning-env/
 _build

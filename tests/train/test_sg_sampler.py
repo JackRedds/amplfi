@@ -1,21 +1,27 @@
 import torch
 
-from amplfi.train.data.utils.utils import ParameterSamplerMultiSG
+from amplfi.train.prior import AmplfiMultiWFPrior
 
 
-def test_parameter_sampler_multi_sg_shapes_and_device():
-    ps = ParameterSamplerMultiSG(n_max=4)
-    batch = 5
-    params = ps(batch, device="cpu")
+def make_prior(n_max=4):
+    return AmplfiMultiWFPrior(
+        n_components=torch.distributions.Uniform(1, n_max + 1),
+        priors={"hrss_tot": torch.distributions.Uniform(1e-21, 1e-20)},
+    )
 
-    # check expected keys
+
+def test_multi_wf_prior_shapes_and_device():
+    prior = make_prior(n_max=4)
+    batch = 32
+    params = prior(batch, device="cpu")
+
     assert "n_components" in params
-    # check shapes and device
-    for k, v in params.items():
+    assert "hrss_tot" in params
+    for v in params.values():
         assert isinstance(v, torch.Tensor)
         assert v.shape == (batch,)
         assert v.device.type == "cpu"
 
-    # n_components should be in 1..n_max
-    n_comp = params["n_components"]
-    assert torch.all((n_comp >= 1) & (n_comp <= 4))
+    n_components = params["n_components"]
+    assert n_components.dtype == torch.long
+    assert torch.all((n_components >= 1) & (n_components <= 4))
