@@ -10,3 +10,4 @@ runs/
 notebooks/
 tuning-env/
 _build
+uv.lock

@@ -5,7 +5,6 @@ Stage: build
 %files
 ./amplfi /opt/amplfi/amplfi
 pyproject.toml /opt/amplfi/pyproject.toml
-uv.lock /opt/amplfi/uv.lock
 conda-lock.yml /opt/amplfi/conda-lock.yml
 
 %post

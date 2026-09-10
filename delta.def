@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: /sw/external/NGC/pytorch_23.05-py3.sif
+From: /sw/external/NGC/pytorch_24.09-py3.sif
 
 %environment
     export PROJECT_DIR="/projects/bcse/"
@@ -12,6 +12,24 @@ From: /sw/external/NGC/pytorch_23.05-py3.sif
 
 python -m pip install --upgrade pip && python -m pip install uv
 
+# NGC's pytorch image bundles a custom, driver-matched torch build, but
+# it doesn't ship torchaudio at all, and public torchaudio wheels are
+# NOT ABI-compatible with NGC's patched torch (confirmed: `undefined
+# symbol` errors loading libtorchaudio against it). torchaudio also
+# doesn't declare a formal dependency on a matching torch version, and
+# its release cadence has fallen behind torch's (e.g. torch has
+# reached 2.14.x while torchaudio tops out around 2.11.x), so letting
+# uv/pip resolve them independently can silently pair mismatched
+# versions. To stay safe we replace the base image's torch entirely
+# with a pinned, verified-compatible torch/torchaudio pair pulled from
+# PyPI (with their normal dependencies, i.e. their own bundled CUDA
+# runtime) instead of trying to reuse NGC's build.
+#
+# Bump this pair deliberately (not automatically) when amplfi's torch
+# floor moves past it, and re-verify with:
+#   apptainer exec --nv <this container> python -c \
+#     "import torch, torchaudio; torchaudio.functional.resample(torch.randn(1, 16000), 16000, 8000)"
+python -m pip install "torch==2.6.0" "torchaudio==2.6.0"
 
 cd /amplfi/ \
     && uv export --format requirements-txt -o requirements.txt.tmp --no-hashes \
