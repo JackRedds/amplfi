@@ -80,7 +80,7 @@ class AmplfiMultiWFPrior(AmplfiPrior):
         n_wavelets = torch.clamp(rand_int, min=1)  # ensure at least 1 sine gaussian
         n_max = n_wavelets.max()
         mask = (
-            torch.arange(n_max).expand(N, n_max) 
+            torch.arange(n_max, device=device).expand(N, n_max) 
             < n_wavelets.unsqueeze(1)
         )
         
