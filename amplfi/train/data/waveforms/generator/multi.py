@@ -1,7 +1,7 @@
 import torch
 from ml4gw.waveforms import MultiWaveform
 from typing import Tuple, Dict
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 if TYPE_CHECKING:
     from ml4gw.transforms import ChannelWiseScaler
 
@@ -9,8 +9,15 @@ from .generator import WaveformGenerator
 
 
 class MultiWFGenerator(WaveformGenerator):
-    def __init__(self, *args, generator: torch.nn.Module, norm: bool = True, **kwargs):
+    def __init__(
+        self,
+        *args,
+        generator: Callable[[float, float], torch.nn.Module],
+        norm: bool = True,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
+        generator = generator(self.sample_rate, self.duration)
         self.multi_wf = MultiWaveform(generator, self.sample_rate, self.duration, norm)
 
     def slice_waveforms(self, waveforms: torch.Tensor, waveform_size: int):

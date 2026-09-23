@@ -94,14 +94,9 @@ data:
         # referenced below as parameter_transformer, also does not exist
         # yet and needs to be implemented.
         generator:
-          # TODO: adjust once ml4gw.waveforms.MultiWaveform lands; this
-          # assumes MultiWaveform instantiates `generator` itself using
-          # the sample_rate/duration below (duration = fduration +
-          # kernel_length = 2 + 5 = 7, matching this file's data config).
+          # sample_rate and duration (fduration + kernel_length) are
+          # supplied by MultiWFGenerator from the data config
           class_path: ml4gw.waveforms.SineGaussian
-          init_args:
-            sample_rate: 2048
-            duration: 7
         norm: true
         num_fit_params: 100000
         num_test_waveforms: 1000
