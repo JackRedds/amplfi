@@ -6,7 +6,10 @@ From: /sw/external/NGC/pytorch_24.09-py3.sif
     export CONTAINER_WORKDIR="/amplfi/"
 
 %files
-. /amplfi/
+    ./amplfi /amplfi/amplfi
+    ./pyproject.toml /amplfi/pyproject.toml
+    ./uv.lock /amplfi/uv.lock
+    ./.git /amplfi/.git
 
 %post
 

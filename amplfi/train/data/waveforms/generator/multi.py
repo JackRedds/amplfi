@@ -1,5 +1,5 @@
 import torch
-from ml4gw.waveforms import SineGaussian
+from ml4gw.waveforms import MultiWaveform
 from typing import Tuple, Dict
 from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
@@ -7,10 +7,11 @@ if TYPE_CHECKING:
 
 from .generator import WaveformGenerator
 
-class SGGenerator(WaveformGenerator):
-    def __init__(self, *args, **kwargs):
+
+class MultiWFGenerator(WaveformGenerator):
+    def __init__(self, *args, generator: torch.nn.Module, norm: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sine_gaussian = SineGaussian(self.sample_rate, self.duration)
+        self.multi_wf = MultiWaveform(generator, self.sample_rate, self.duration, norm)
 
     def slice_waveforms(self, waveforms: torch.Tensor, waveform_size: int):
         # for sine gaussians, place waveform in center of kernel
@@ -21,10 +22,9 @@ class SGGenerator(WaveformGenerator):
         return waveforms[..., start:stop]
 
     def forward(self, **parameters):
-        hc, hp = self.sine_gaussian(**parameters)
+        hc, hp = self.multi_wf(**parameters)
         waveforms = torch.stack([hc, hp], dim=1)
         if self.time_translator is not None:
             waveforms = self.time_translator(waveforms)
         hc, hp = waveforms.transpose(1, 0)
         return hc, hp
-

@@ -79,35 +79,27 @@ data:
     ifos: ["H1", "L1"]
     min_valid_duration: 10000.0
     waveform_sampler:
-      class_path: amplfi.train.data.waveforms.generator.sg.MultiSGGenerator
+      class_path: amplfi.train.data.waveforms.generator.multi.MultiWFGenerator
       init_args:
-        n_max: 4
-        frequency:
-          class_path: torch.distributions.Uniform
+        # NOTE: per-component nuisance priors (frequency, quality, phase,
+        # eccentricity, shifts, hrss_concentration) previously lived here
+        # but don't match MultiWFGenerator's constructor and have been
+        # dropped. They need to be reintroduced -- likely as per-component
+        # entries in training_prior.priors below, consumed via a
+        # conversion_function/parameter_transformer -- once
+        # ml4gw.waveforms.MultiWaveform (and its expected `generator`
+        # component) exist. `amplfi.train.prior.multi_sg_transformer`,
+        # referenced below as parameter_transformer, also does not exist
+        # yet and needs to be implemented.
+        generator:
+          # TODO: adjust once ml4gw.waveforms.MultiWaveform lands; this
+          # assumes MultiWaveform instantiates `generator` itself using
+          # the sample_rate/duration below (duration = fduration +
+          # kernel_length = 2 + 5 = 7, matching this file's data config).
+          class_path: ml4gw.waveforms.SineGaussian
           init_args:
-            low: 32
-            high: 1024
-        quality:
-          class_path: torch.distributions.Uniform
-          init_args:
-            low: 2
-            high: 100
-        phase:
-          class_path: torch.distributions.Uniform
-          init_args:
-            low: 0
-            high: 6.28318
-        eccentricity:
-          class_path: torch.distributions.Uniform
-          init_args:
-            low: 0
-            high: 1
-        shifts:
-          class_path: torch.distributions.Uniform
-          init_args:
-            low: -0.01
-            high: 0.01
-        hrss_concentration: 1.0
+            sample_rate: 2048
+            duration: 7
         norm: true
         num_fit_params: 100000
         num_test_waveforms: 1000
@@ -116,7 +108,7 @@ data:
         training_prior:
           class_path: amplfi.train.prior.AmplfiMultiWFPrior
           init_args:
-            n_components:
+            n_wf:
               class_path: torch.distributions.Uniform
               init_args:
                 low: 1
