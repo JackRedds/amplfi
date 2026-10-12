@@ -1,0 +1,175 @@
+# lightning.pytorch==2.1.3
+seed_everything: 101588
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  profiler: "simple"
+  logger:
+    - class_path: lightning.pytorch.loggers.WandbLogger
+      init_args:
+        save_dir: ${oc.env:AMPLFI_OUTDIR}/train
+        project: amplfi
+        # uncomment and set to name your run
+        # name:
+  max_epochs: 800
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 20
+  benchmark: false
+  callbacks: ./callbacks.yaml
+model:
+  class_path: amplfi.train.models.diffusion.DiffusionModel
+  init_args:
+    train_outdir: ${oc.env:AMPLFI_OUTDIR}
+    samples_per_event: 10000
+    arch:
+      class_path: amplfi.train.architectures.DDPM
+      init_args:
+        hidden_features: 256
+        num_blocks: 4
+        time_embed_dim: 128
+        num_timesteps: 1000
+        # fewer sampling steps trade posterior fidelity for
+        # faster inference via DDIM; defaults to num_timesteps
+        sampling_timesteps: 100
+        eta: 1.0
+        # uncomment below to load
+        # in pre-trained embedding weights
+        # embedding_weights: "path/to/embedding/weights"
+        # freeze_embedding: false
+        slot_head:
+          class_path: amplfi.train.architectures.SlotHead
+          init_args:
+            slot_params: ${data.init_args.slot_params}
+            max_components: ${data.init_args.max_components}
+            slot_dim: 128
+            decoder_layers: 2
+            decoder_heads: 4
+            # per-slot normalizing flow
+            transforms: 10
+            hidden_features: [256, 256]
+            randperm: true
+        # the slots cross-attend to every token of embeddings with
+        # `forward_tokens`, like this one (or MultiModalTransformer and
+        # MultiModalPsdTransformer, which give time and frequency
+        # tokens). Other embeddings (e.g. ResNet)
+        # also work: their context vector is projected to the slot
+        # head's `num_memory_tokens` tokens instead. The context vector
+        # also feeds the number-of-components classifier, so keep
+        # context_dim large
+        embedding_net:
+          class_path: amplfi.train.architectures.embeddings.TimeDomainTransformer
+          init_args:
+            context_dim: 128
+            layers: [32, 64, 128]
+            transformer_layers: 4
+            transformer_heads: 8
+            transformer_dim_feedforward: 512
+            patch_size: 4
+    learning_rate: 3.77e-4
+    pct_start: 0.1
+    weight_decay: 0.0
+data:
+  class_path: amplfi.train.data.datasets.SlotFlowDataset
+  init_args:
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0
+        high: 3.14
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: -3.14
+        high: 3.14
+    data_dir: ${oc.env:AMPLFI_DATADIR}
+    # event-level (global) parameters, inferred by the architecture
+    inference_params: ["hrss_tot", "dec", "psi", "phi"]
+    # per-component (slot) parameters, inferred by the slot head along
+    # with the number of components. `slot_params` and `max_components`
+    # are interpolated into the slot head and prior; if overriding them
+    # from the command line, override those entries as well
+    # phase is inferred as (cos_phase, sin_phase), which, unlike the
+    # angle itself, is continuous across 0 and 2 pi. Test results
+    # also report the recovered phase_{i}
+    slot_params: ["frequency", "quality", "hrss_frac", "cos_phase", "sin_phase", "eccentricity", "shifts"]
+    max_components: 4
+    parameter_transformer: amplfi.train.prior.multi_sg_transformer
+    highpass: 25
+    sample_rate: 2048
+    kernel_length: 5
+    fduration: 2
+    psd_length: 12
+    fftlength: 2
+    batches_per_epoch: 200
+    batch_size: 512
+    ifos: ["H1", "L1"]
+    min_valid_duration: 10000.0
+    waveform_sampler:
+      class_path: amplfi.train.data.waveforms.generator.multi.MultiWFGenerator
+      init_args:
+        generator:
+          # sample_rate and duration (fduration + kernel_length) are
+          # supplied by MultiWFGenerator from the data config
+          class_path: ml4gw.waveforms.SineGaussian
+        # rescale the summed components to hrss_tot
+        norm: true
+        num_fit_params: 100000
+        num_test_waveforms: 1000
+        num_val_waveforms: 10000
+        testing_prior: null
+        training_prior:
+          class_path: amplfi.train.prior.AmplfiMultiWFPrior
+          init_args:
+            # samples are cast to integers, so this gives 1-4 components
+            n_wf:
+              class_path: torch.distributions.Uniform
+              init_args:
+                low: 1
+                high: 5
+            # pad components to a fixed number of slots
+            max_components: ${data.init_args.max_components}
+            conversion_function: amplfi.train.prior.multi_sg_conversion
+            # per-component priors
+            priors:
+              frequency:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 32
+                  high: 1024
+              quality:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 2
+                  high: 100
+              # with norm: true, only the relative component
+              # amplitudes (hrss_frac) matter
+              hrss:
+                class_path: ml4gw.distributions.LogUniform
+                init_args:
+                  low: 1e-23
+                  high: 5e-20
+              phase:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0
+                  high: 6.283
+              eccentricity:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0
+                  high: 1
+              # time offset (s) of each component from the kernel center
+              shifts:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: -0.1
+                  high: 0.1
+            event_priors:
+              hrss_tot:
+                class_path: ml4gw.distributions.LogUniform
+                init_args:
+                  low: 1e-23
+                  high: 5e-20

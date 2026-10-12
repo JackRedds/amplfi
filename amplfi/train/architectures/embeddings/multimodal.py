@@ -127,7 +127,8 @@ class MultiModalPsd(Embedding):
     def forward(self, X):
         strain, asds = X
 
-        asds *= 1e23
+        # don't scale in place, which would modify the caller's asds
+        asds = asds * 1e23
         asds = asds.float()
         inv_asds = 1 / asds
 
@@ -219,7 +220,8 @@ class MultiModalPsdEmbeddingWithDecimator(Embedding):
     def forward(self, X):
         strain, asds = X
 
-        asds *= 1e23
+        # don't scale in place, which would modify the caller's asds
+        asds = asds * 1e23
         asds = asds.float()
         inv_asds = 1 / asds
 
@@ -293,7 +295,8 @@ class FrequencyPsd(Embedding):
     def forward(self, X):
         strain, asds = X
 
-        asds *= 1e23
+        # don't scale in place, which would modify the caller's asds
+        asds = asds * 1e23
         asds = asds.float()
         inv_asds = 1 / asds
 

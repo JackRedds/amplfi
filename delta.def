@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: /sw/external/NGC/pytorch_25.10-py3.sif
+From: /sw/external/NGC/pytorch_24.09-py3.sif
 
 %environment
     export PROJECT_DIR="/projects/bcse/"
@@ -13,21 +13,24 @@ From: /sw/external/NGC/pytorch_25.10-py3.sif
 
 %post
 set -e
+export PIP_NO_CACHE_DIR=1
+# the NGC image's pip config adds pypi.ngc.nvidia.com as an extra index,
+# which no longer resolves; ignore it so pip only uses PyPI
+export PIP_CONFIG_FILE=/dev/null
+unset PIP_EXTRA_INDEX_URL PIP_INDEX_URL
+# git (needed to build ml4gw and amplfi) fails with a libpcre2 symbol error
+# when LD_LIBRARY_PATH is set; only affects the build, not the runtime env
+unset LD_LIBRARY_PATH
 
-python -m pip install --upgrade pip && python -m pip install uv
+python -m pip install --upgrade pip uv
+python -m pip install "numpy>=1.26,<2.0" "numba>=0.59,<0.60"
 
-python -m pip install "numpy>=1.26,<2.0"
-python -m pip install "numba>=0.59,<0.60"
-python -m pip install "torch>=2.3.0" "torchvision>=0.18.0" "torchaudio" --index-url https://download.pytorch.org/whl/cu121
-
-cd /amplfi/ \
-    && uv export --format requirements-txt -o requirements.txt.tmp --no-hashes \
-    && cat requirements.txt.tmp | grep -v 'numpy==' | grep -v 'torch==' | grep -v 'torchaudio==' | grep -v 'torchvision==' | grep -v 'triton' | grep -v 'protobuf' | grep -v 'nvidia' > requirements.txt \
-    && rm requirements.txt.tmp \
-    && python -m pip install -r requirements.txt --no-deps \
-    && python -m pip install -e . --no-deps
-
+cd /amplfi/
+uv export --format requirements-txt --no-hashes --no-default-groups --no-emit-project -o requirements.txt.tmp
+grep -v -E 'numpy==|torch==|torchaudio==|torchvision==|triton|protobuf|nvidia' requirements.txt.tmp > requirements.txt
+rm requirements.txt.tmp
+python -m pip install -r requirements.txt --no-deps
+python -m pip install -e . --no-deps
 
 %runscript
-#!/bin/bash
-exec "$@"
+    exec "$@"

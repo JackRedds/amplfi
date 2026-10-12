@@ -6,6 +6,7 @@ import torch
 from ..architectures.flows import FlowArchitecture
 from ...utils.result import AmplfiResult
 from .base import AmplfiModel
+from .slot import SlotModelMixin
 from typing import Optional
 from bilby.core.prior import PriorDict
 from ..data.datasets.testing import ra_from_phi
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 Tensor = torch.Tensor
 
 
-class FlowModel(AmplfiModel):
+class FlowModel(SlotModelMixin, AmplfiModel):
     """
     A LightningModule for training normalizing flows
 
@@ -63,6 +64,7 @@ class FlowModel(AmplfiModel):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.model = arch
+        self.init_slots()
         self.samples_per_event = samples_per_event
         self.min_samples_per_pix_dist = min_samples_per_pix_dist
         self.max_samples_per_pixel = max_samples_per_pixel
@@ -80,6 +82,8 @@ class FlowModel(AmplfiModel):
         return -self.model.log_prob(parameters, context=context)
 
     def training_step(self, batch, _):
+        if self.slot_head is not None:
+            return self.slot_step(batch, "train")
         strain, asds, parameters, _ = batch
         context = (strain, asds)
         loss = self(context, parameters).mean()
@@ -95,6 +99,8 @@ class FlowModel(AmplfiModel):
         return loss
 
     def validation_step(self, batch, _):
+        if self.slot_head is not None:
+            return self.slot_step(batch, "valid")
         strain, asds, parameters, _ = batch
         context = (strain, asds)
         loss = self(context, parameters).mean()
@@ -146,8 +152,8 @@ class FlowModel(AmplfiModel):
         self, strain, asds, parameters=None, snr=None, gpstime=None
     ) -> tuple[AmplfiResult, Optional[AmplfiResult]]:
         context = (strain, asds)
-        samples = self.model.sample(
-            self.hparams.samples_per_event, context=context
+        samples, slot_samples = self.sample_posterior(
+            self.hparams.samples_per_event, context
         )
         log_probs = self.model.log_prob(samples, context)
 
@@ -155,9 +161,10 @@ class FlowModel(AmplfiModel):
         log_probs = log_probs.squeeze(1)
 
         descaled = self.scale(samples, reverse=True)
+        keep = torch.ones(len(descaled), dtype=torch.bool)
         if self.filter_params:
-            descaled, mask = self.filter_parameters(descaled)
-            log_probs = log_probs[mask]
+            descaled, keep = self.filter_parameters(descaled)
+            log_probs = log_probs[keep]
 
         # convert samples to dictionary for
         # calculating log probabilites
@@ -176,6 +183,7 @@ class FlowModel(AmplfiModel):
 
         # when predicting, there will be no ground truth parameters
         injection_parameters = None
+        parameters, targets = self.split_targets(parameters)
         if parameters is not None:
             parameters = self.scale(parameters, reverse=True)
             parameters = parameters.cpu().numpy()[0]
@@ -208,6 +216,9 @@ class FlowModel(AmplfiModel):
             log_prior_of_posterior_samples.cpu().numpy(),
             injection_parameters,
         )
+
+        if slot_samples is not None:
+            self.add_slot_results(result, slot_samples, keep, targets)
 
         # optionally reweight to different prior
         # TODO: include likelihood reweighting
@@ -303,11 +314,22 @@ class FlowModel(AmplfiModel):
         net_mask = torch.ones(
             parameters.shape[0], dtype=bool, device=parameters.device
         )
-        priors = self.training_prior.priors
+        priors = dict(self.training_prior.priors)
+        priors.update(getattr(self.training_prior, "event_priors", {}))
+        # priors are defined on untransformed parameters, so
+        # transformed ones (e.g. log hrss) can't be checked against them
+        transformer = self.trainer.datamodule.parameter_transformer
+        transformed = getattr(transformer, "transforms", {})
         for i, param in enumerate(self.inference_params):
             samples = parameters[:, i]
             if param in ["dec", "psi", "phi"]:
                 prior = getattr(self.trainer.datamodule, param)
+            elif param in transformed or param not in priors:
+                self._logger.debug(
+                    f"Not filtering transformed or prior-less "
+                    f"parameter {param}"
+                )
+                continue
             else:
                 prior = priors[param]
 

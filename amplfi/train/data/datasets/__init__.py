@@ -5,3 +5,4 @@ from .testing import (
     StrainTestingDataset,
     RawStrainTestingDataset,
 )
+from .slot import SlotFlowDataset

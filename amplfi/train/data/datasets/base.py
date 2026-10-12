@@ -467,7 +467,12 @@ class AmplfiDataset(pl.LightningDataModule):
                     params.append(torch.Tensor(parameters[k]))
 
             self.test_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
-            self.test_parameters = pd.DataFrame(parameters)
+            # keep event-level parameters; per-component parameters of
+            # multi-component waveforms have shape (N, K)
+            self.test_parameters = pd.DataFrame(
+                {k: v for k, v in parameters.items() if np.ndim(v) == 1}
+            )
+            self.test_waveform_parameters: dict[str, Tensor] = parameters
             self.test_extrinsic = {key: [] for key in ["dec", "psi", "phi"]}
             self.test_waveforms = torch.stack([cross, plus], dim=0)
 
@@ -504,6 +509,18 @@ class AmplfiDataset(pl.LightningDataModule):
         background = next(iter(dataset))
         return background
 
+    def unpack_parameters(self, parameters: Tensor) -> dict[str, Tensor]:
+        """
+        Convert the stacked validation/testing parameter
+        tensor back into a dictionary of parameters
+        """
+        keys = [
+            k
+            for k in self.hparams.inference_params
+            if k not in ["dec", "psi", "phi"]
+        ]
+        return {k: parameters[:, i] for i, k in enumerate(keys)}
+
     def on_after_batch_transfer(
         self, batch, _
     ) -> tuple[Tensor, Tensor, dict[str, Tensor], Tensor]:
@@ -524,24 +541,17 @@ class AmplfiDataset(pl.LightningDataModule):
         elif self.trainer.validating or self.trainer.sanity_checking:
             [cross, plus, parameters], [background] = batch
             background = background[: len(cross)]
-            keys = [
-                k
-                for k in self.hparams.inference_params
-                if k not in ["dec", "psi", "phi"]
-            ]
-            parameters = {k: parameters[:, i] for i, k in enumerate(keys)}
+            parameters = self.unpack_parameters(parameters)
             strain, asds, parameters, snrs = self.inject(
                 background, cross, plus, parameters
             )
 
         elif self.trainer.testing:
             [cross, plus, parameters], [background] = batch
-            keys = [
-                k
-                for k in self.hparams.inference_params
-                if k not in ["dec", "psi", "phi"]
-            ]
-            parameters = {k: parameters[:, i] for i, k in enumerate(keys)}
+            # the in-memory test background is batched at the
+            # training batch size, but waveforms one at a time
+            background = background[: len(cross)]
+            parameters = self.unpack_parameters(parameters)
             strain, asds, parameters, snrs = self.inject(
                 background, cross, plus, parameters
             )

@@ -7,12 +7,19 @@ import torch
 import zuko
 
 from .embeddings.base import Embedding
+from .slots import SlotArchitectureMixin, SlotHead
 
 
-class FlowArchitecture(torch.nn.Module):
+class FlowArchitecture(SlotArchitectureMixin, torch.nn.Module):
     """
     Base class for normalizing flow architectures that
     provides interface for interacting with embedding networks
+
+    Args:
+        slot_head:
+            Optional `SlotHead` for also inferring the number and
+            parameters of a signal's components. See
+            `amplfi.train.architectures.slots.SlotHead`
     """
 
     def __init__(
@@ -21,6 +28,7 @@ class FlowArchitecture(torch.nn.Module):
         embedding_net: Embedding,
         embedding_weights: Optional[Path] = None,
         freeze_embedding: bool = False,
+        slot_head: Optional[SlotHead] = None,
     ):
         super().__init__()
         self.num_params = num_params
@@ -71,8 +79,16 @@ class FlowArchitecture(torch.nn.Module):
                     )
                     raise
 
+        self.init_slot_head(slot_head)
+
     def build_flow(self) -> zuko.lazy.Flow:
         raise NotImplementedError
+
+    def global_loss(self, x, embedded):
+        return -self.flow(embedded).log_prob(x)
+
+    def sample_global(self, n: int, embedded):
+        return self.flow(embedded).sample((n,))
 
     def log_prob(self, x, context):
         """Wrapper around :meth:`log_prob` from

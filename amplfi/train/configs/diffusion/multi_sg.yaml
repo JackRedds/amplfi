@@ -20,7 +20,7 @@ trainer:
 model:
   class_path: amplfi.train.models.diffusion.DiffusionModel
   init_args:
-    outdir: ${oc.env:AMPLFI_OUTDIR}
+    train_outdir: ${oc.env:AMPLFI_OUTDIR}
     samples_per_event: 10000
     arch:
       class_path: amplfi.train.architectures.DDPM
@@ -65,11 +65,9 @@ data:
         low: -3.14
         high: 3.14
     data_dir: ${oc.env:AMPLFI_DATADIR}
-    # only event-level summary parameters are inference targets:
-    # individual sine-Gaussian components are unordered and vary in
-    # count, so they're not well-posed targets for the model. Their
-    # nuisance parameters (frequency, quality, phase, eccentricity,
-    # shifts) are sampled inside the waveform_sampler below instead.
+    # event-level parameters. The individual sine-Gaussian components
+    # are unordered and vary in count, so here they're nuisance
+    # parameters; see multi_sg_slots.yaml (flow) to also infer them
     inference_params: ["n_components", "hrss_tot", "dec", "psi", "phi"]
     parameter_transformer: amplfi.train.prior.multi_sg_transformer
     highpass: 25
@@ -85,20 +83,11 @@ data:
     waveform_sampler:
       class_path: amplfi.train.data.waveforms.generator.multi.MultiWFGenerator
       init_args:
-        # NOTE: per-component nuisance priors (frequency, quality, phase,
-        # eccentricity, shifts, hrss_concentration) previously lived here
-        # but don't match MultiWFGenerator's constructor and have been
-        # dropped. They need to be reintroduced -- likely as per-component
-        # entries in training_prior.priors below, consumed via a
-        # conversion_function/parameter_transformer -- once
-        # ml4gw.waveforms.MultiWaveform (and its expected `generator`
-        # component) exist. `amplfi.train.prior.multi_sg_transformer`,
-        # referenced below as parameter_transformer, also does not exist
-        # yet and needs to be implemented.
         generator:
           # sample_rate and duration (fduration + kernel_length) are
           # supplied by MultiWFGenerator from the data config
           class_path: ml4gw.waveforms.SineGaussian
+        # rescale the summed components to hrss_tot
         norm: true
         num_fit_params: 100000
         num_test_waveforms: 1000
@@ -107,12 +96,49 @@ data:
         training_prior:
           class_path: amplfi.train.prior.AmplfiMultiWFPrior
           init_args:
+            # samples are cast to integers, so this gives 1-4 components
             n_wf:
               class_path: torch.distributions.Uniform
               init_args:
                 low: 1
                 high: 5
+            conversion_function: amplfi.train.prior.multi_sg_conversion
+            # per-component priors
             priors:
+              frequency:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 32
+                  high: 1024
+              quality:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 2
+                  high: 100
+              # with norm: true, only the relative component
+              # amplitudes (hrss_frac) matter
+              hrss:
+                class_path: ml4gw.distributions.LogUniform
+                init_args:
+                  low: 1e-23
+                  high: 5e-20
+              phase:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0
+                  high: 6.283
+              eccentricity:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0
+                  high: 1
+              # time offset (s) of each component from the kernel center
+              shifts:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: -0.1
+                  high: 0.1
+            event_priors:
               hrss_tot:
                 class_path: ml4gw.distributions.LogUniform
                 init_args:
