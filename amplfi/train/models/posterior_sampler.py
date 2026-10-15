@@ -151,7 +151,7 @@ class PosteriorSamplerModel(SlotModelMixin, AmplfiModel):
         )
         samples = samples.squeeze(1)
 
-        descaled = self.scale(samples, reverse=True)
+        descaled = self.requantize(self.scale(samples, reverse=True))
         keep = torch.ones(len(descaled), dtype=torch.bool)
         if self.filter_params:
             descaled, keep = self.filter_parameters(descaled)
@@ -183,7 +183,9 @@ class PosteriorSamplerModel(SlotModelMixin, AmplfiModel):
         injection_parameters = None
         parameters, targets = self.split_targets(parameters)
         if parameters is not None:
-            parameters = self.scale(parameters, reverse=True)
+            parameters = self.requantize(
+                self.scale(parameters, reverse=True)
+            )
             parameters = parameters.cpu().numpy()[0]
 
             # create a dictionary of injection parameters

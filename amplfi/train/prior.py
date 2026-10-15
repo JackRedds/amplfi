@@ -223,7 +223,20 @@ class ParameterTransformer(torch.nn.Module):
         return parameters
 
 
+def dequantize(x: torch.Tensor) -> torch.Tensor:
+    """
+    Add `U(0, 1)` noise to an integer-valued parameter, so that a
+    continuous density model sees a piecewise-constant density rather
+    than delta functions. Flooring samples (see
+    `AmplfiModel.requantize`) recovers the integer value
+    """
+    return x + torch.rand_like(x)
+
+
 # log the event and per-component amplitudes for the multi-component
 # sine-Gaussian use case. Padded components have zero hrss, so their
-# log is -inf; slot datasets mask these out after transforming
-multi_sg_transformer = ParameterTransformer(hrss_tot=torch.log, hrss=torch.log)
+# log is -inf; slot datasets mask these out after transforming.
+# `n_components` is dequantized so it can be an inference parameter
+multi_sg_transformer = ParameterTransformer(
+    hrss_tot=torch.log, hrss=torch.log, n_components=dequantize
+)

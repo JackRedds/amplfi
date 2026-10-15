@@ -4,8 +4,10 @@ from ml4gw.waveforms import SineGaussian
 from torch.distributions import Uniform
 
 from amplfi.train.data.waveforms.generator.multi import MultiWFGenerator
+from amplfi.train.models.base import AmplfiModel
 from amplfi.train.prior import (
     AmplfiMultiWFPrior,
+    dequantize,
     multi_sg_conversion,
     multi_sg_transformer,
 )
@@ -60,6 +62,33 @@ def test_transformer_skips_missing_keys():
     parameters = {"hrss_tot": torch.ones(3)}
     transformed = multi_sg_transformer(parameters)
     assert set(transformed) == {"hrss_tot"}
+
+
+def test_dequantize_round_trip():
+    n_components = build_prior()(1000)["n_components"]
+    dequantized = multi_sg_transformer(
+        {"n_components": n_components.clone()}
+    )["n_components"]
+    assert (dequantized >= n_components).all()
+    assert (dequantized < n_components + 1).all()
+    # noise actually fills the unit interval
+    assert (dequantized - n_components).std() > 0.2
+
+    # flooring dequantized samples recovers the count, and
+    # only discrete parameters are floored
+    class Model:
+        inference_params = ["hrss_tot", "n_components"]
+        discrete_params = AmplfiModel.discrete_params
+
+    samples = torch.column_stack([dequantized, dequantized])
+    requantized = AmplfiModel.requantize(Model(), samples)
+    torch.testing.assert_close(requantized[:, 1], n_components)
+    torch.testing.assert_close(requantized[:, 0], dequantized)
+
+    # samples below the support are clamped to one component
+    low = torch.tensor([[0.0, 0.3], [0.0, -2.0]])
+    assert (AmplfiModel.requantize(Model(), low)[:, 1] == 1).all()
+    assert dequantize(torch.zeros(3)).max() < 1
 
 
 def test_generator():
