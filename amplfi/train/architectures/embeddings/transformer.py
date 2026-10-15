@@ -381,6 +381,13 @@ class Transformer(nn.Module):
 
                 [batch, classes]
         """
+        return self.encode(x)[:, 0]
+
+    def encode(self, x: torch.Tensor):
+        """
+        Like `forward`, but returns every token rather than only
+        the CLS token, with shape [batch, 1 + n_tokens, transformer_dim]
+        """
 
         if x.ndim != 3:
             raise ValueError(
@@ -454,13 +461,7 @@ class Transformer(nn.Module):
 
         x = self.final_norm(x)
 
-        # ---------------------------------------------------------
-        # Global representation
-        #
-        # CLS token
-        # ---------------------------------------------------------
-
-        return x[:, 0]
+        return x
 
 
 class TimeDomainTransformer(Embedding):
@@ -510,8 +511,67 @@ class TimeDomainTransformer(Embedding):
 
         return context
 
+    @property
+    def token_dims(self) -> list[int]:
+        return [self.context_dim]
 
-class MultiModalTransformer(Embedding):
+    def forward_tokens(self, X):
+        """
+        Return the context vector (equal to `forward`'s output)
+        and a list with the sequence of time tokens, for slot heads
+        (see `amplfi.train.architectures.slots.SlotHead`)
+        """
+        strain, _ = X
+        tokens = self.embedding.encode(strain)
+        return tokens[:, 0], [tokens[:, 1:]]
+
+
+class _MultiModalTokens:
+    """
+    Shared `forward` and `forward_tokens` for embeddings with
+    a time domain and a frequency domain `Transformer` branch,
+    whose CLS tokens are fused into the context vector.
+    Subclasses define `branch_inputs`, which returns the
+    inputs to the time and frequency branches
+    """
+
+    def branch_inputs(self, X) -> tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError
+
+    def forward(self, X):
+        strain, freq_input = self.branch_inputs(X)
+        time_context = self.time_embedding(strain)
+        freq_context = self.freq_embedding(freq_input)
+        context = torch.cat(
+            [
+                time_context,
+                freq_context,
+            ],
+            dim=-1,
+        )
+        return self.fusion(context)
+
+    @property
+    def token_dims(self) -> list[int]:
+        return [
+            self.time_embedding.transformer_dim,
+            self.freq_embedding.transformer_dim,
+        ]
+
+    def forward_tokens(self, X):
+        """
+        Return the context vector (equal to `forward`'s output)
+        and a list with the sequences of time and frequency tokens,
+        for slot heads (see `amplfi.train.architectures.slots.SlotHead`)
+        """
+        strain, freq_input = self.branch_inputs(X)
+        time_tokens = self.time_embedding.encode(strain)
+        freq_tokens = self.freq_embedding.encode(freq_input)
+        context = torch.cat([time_tokens[:, 0], freq_tokens[:, 0]], dim=-1)
+        return self.fusion(context), [time_tokens[:, 1:], freq_tokens[:, 1:]]
+
+
+class MultiModalTransformer(_MultiModalTokens, Embedding):
     def __init__(
         self,
         num_ifos: int,
@@ -586,27 +646,14 @@ class MultiModalTransformer(Embedding):
             ),
         )
 
-    def forward(self, X):
+    def branch_inputs(self, X):
         strain, _ = X
-
-        time_context = self.time_embedding(strain)
         strain_fft = torch.fft.rfft(strain)
         strain_fft = torch.cat((strain_fft.real, strain_fft.imag), dim=1)
-
-        freq_context = self.freq_embedding(strain_fft)
-
-        context = torch.cat(
-            [
-                time_context,
-                freq_context,
-            ],
-            dim=-1,
-        )
-
-        return self.fusion(context)
+        return strain, strain_fft
 
 
-class MultiModalPsdTransformer(Embedding):
+class MultiModalPsdTransformer(_MultiModalTokens, Embedding):
     def __init__(
         self,
         num_ifos: int,
@@ -681,26 +728,14 @@ class MultiModalPsdTransformer(Embedding):
             ),
         )
 
-    def forward(self, X):
+    def branch_inputs(self, X):
         strain, asds = X
-
-        asds *= 1e23
+        # don't scale in place, which would modify the caller's asds
+        asds = asds * 1e23
         asds = asds.float()
         inv_asds = 1 / asds
 
-        time_context = self.time_embedding(strain)
         X_fft = torch.fft.rfft(strain)
         X_fft = X_fft[..., -asds.shape[-1] :]
         X_fft = torch.cat((X_fft.real, X_fft.imag, inv_asds), dim=1)
-
-        freq_context = self.freq_embedding(X_fft)
-
-        context = torch.cat(
-            [
-                time_context,
-                freq_context,
-            ],
-            dim=-1,
-        )
-
-        return self.fusion(context)
+        return strain, X_fft

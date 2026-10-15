@@ -25,6 +25,16 @@ class SaveConfigCallback(SaveConfigCallback):
                 trainer.logger.experiment.config.update(self.config.as_dict())
 
 
+def _write_parameters(h5file, parameters):
+    # slot-based datasets return a dictionary of targets
+    if isinstance(parameters, dict):
+        group = h5file.create_group("parameters")
+        for k, v in parameters.items():
+            group[k] = v.cpu().numpy()
+    else:
+        h5file["parameters"] = parameters.cpu().numpy()
+
+
 class SaveAugmentedBatch(pl.Callback):
     def on_train_start(self, trainer, pl_module):
         if trainer.global_rank == 0:
@@ -52,14 +62,7 @@ class SaveAugmentedBatch(pl.Callback):
                 val_parameters.to(device),
             )
             background = background.to(device)
-            keys = [
-                k
-                for k in datamodule.hparams.inference_params
-                if k not in ["dec", "psi", "phi"]
-            ]
-            val_parameters = {
-                k: val_parameters[:, i] for i, k in enumerate(keys)
-            }
+            val_parameters = datamodule.unpack_parameters(val_parameters)
             val_strain, val_asds, val_parameters, val_snrs = datamodule.inject(
                 background, val_cross, val_plus, val_parameters
             )
@@ -73,7 +76,7 @@ class SaveAugmentedBatch(pl.Callback):
                         with h5py.File(f, "w") as h5file:
                             h5file["strain"] = strain.cpu().numpy()
                             h5file["asds"] = asds.cpu().numpy()
-                            h5file["parameters"] = parameters.cpu().numpy()
+                            _write_parameters(h5file, parameters)
                             h5file["snrs"] = snrs.cpu().numpy()
                         s3_file.write(f.getvalue())
 
@@ -82,7 +85,7 @@ class SaveAugmentedBatch(pl.Callback):
                         with h5py.File(f, "w") as h5file:
                             h5file["strain"] = val_strain.cpu().numpy()
                             h5file["asds"] = val_asds.cpu().numpy()
-                            h5file["parameters"] = val_parameters.cpu().numpy()
+                            _write_parameters(h5file, val_parameters)
                             h5file["snrs"] = val_snrs.cpu().numpy()
                         s3_file.write(f.getvalue())
             else:
@@ -91,7 +94,7 @@ class SaveAugmentedBatch(pl.Callback):
                 ) as f:
                     f["strain"] = strain.cpu().numpy()
                     f["asds"] = asds.cpu().numpy()
-                    f["parameters"] = parameters.cpu().numpy()
+                    _write_parameters(f, parameters)
                     f["snrs"] = snrs.cpu().numpy()
 
                 with h5py.File(
@@ -99,7 +102,7 @@ class SaveAugmentedBatch(pl.Callback):
                 ) as f:
                     f["strain"] = val_strain.cpu().numpy()
                     f["asds"] = val_asds.cpu().numpy()
-                    f["parameters"] = val_parameters.cpu().numpy()
+                    _write_parameters(f, val_parameters)
                     f["snrs"] = val_snrs.cpu().numpy()
 
 
@@ -124,7 +127,7 @@ class SaveAugmentedSimilarityBatch(pl.Callback):
                 f["ref"] = ref.cpu().numpy()
                 f["aug"] = aug.cpu().numpy()
                 f["asds"] = asds.cpu().numpy()
-                f["parameters"] = parameters.cpu().numpy()
+                _write_parameters(f, parameters)
 
             # save an example validation batch
             # and parameters to disk
@@ -150,7 +153,7 @@ class SaveAugmentedSimilarityBatch(pl.Callback):
                 f["ref"] = ref.cpu().numpy()
                 f["aug"] = aug.cpu().numpy()
                 f["asds"] = asds.cpu().numpy()
-                f["parameters"] = parameters.cpu().numpy()
+                _write_parameters(f, parameters)
 
 
 class ModelCheckpoint(pl.callbacks.ModelCheckpoint):

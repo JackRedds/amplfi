@@ -145,6 +145,22 @@ class AmplfiModel(pl.LightningModule):
         scaled = scaled.transpose(1, 0)
         return scaled
 
+    # integer-valued parameters that are dequantized
+    # with `amplfi.train.prior.dequantize` during training
+    discrete_params = ["n_components"]
+
+    def requantize(self, parameters: Tensor) -> Tensor:
+        """
+        Floor descaled samples of discrete inference parameters
+        to recover integer values. Lower values are clamped to 1,
+        since dequantization only ever adds noise in [0, 1)
+        """
+        parameters = parameters.clone()
+        for i, param in enumerate(self.inference_params):
+            if param in self.discrete_params:
+                parameters[:, i] = parameters[:, i].floor().clamp_min(1)
+        return parameters
+
     def configure_callbacks(self):
         callbacks = [SaveWandbUrl()]
         return callbacks

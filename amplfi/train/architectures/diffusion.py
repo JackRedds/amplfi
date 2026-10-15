@@ -7,6 +7,7 @@ import torch
 
 from .components import ConditionalMLP
 from .embeddings.base import Embedding, load_embedding_weights
+from .slots import SlotArchitectureMixin, SlotHead
 
 
 def cosine_beta_schedule(
@@ -21,7 +22,7 @@ def cosine_beta_schedule(
     return torch.clip(betas, 0.0001, 0.9999)
 
 
-class DiffusionArchitecture(torch.nn.Module):
+class DiffusionArchitecture(SlotArchitectureMixin, torch.nn.Module):
     """
     Base class for diffusion architectures that provides the
     interface for interacting with embedding networks, mirroring
@@ -47,6 +48,10 @@ class DiffusionArchitecture(torch.nn.Module):
             embedding weights.
         freeze_embedding:
             Whether to freeze the embedding network's weights.
+        slot_head:
+            Optional `SlotHead` for also inferring the number and
+            parameters of a signal's components. See
+            `amplfi.train.architectures.slots.SlotHead`
     """
 
     def __init__(
@@ -58,6 +63,7 @@ class DiffusionArchitecture(torch.nn.Module):
         eta: float = 1.0,
         embedding_weights: Optional[Path] = None,
         freeze_embedding: bool = False,
+        slot_head: Optional[SlotHead] = None,
     ):
         super().__init__()
         self.num_params = num_params
@@ -75,6 +81,8 @@ class DiffusionArchitecture(torch.nn.Module):
 
         if embedding_weights is not None:
             load_embedding_weights(self.embedding_net, embedding_weights)
+
+        self.init_slot_head(slot_head)
 
         betas = cosine_beta_schedule(num_timesteps)
         alphas_cumprod = torch.cumprod(1.0 - betas, dim=0)
@@ -113,7 +121,9 @@ class DiffusionArchitecture(torch.nn.Module):
 
         with self.embedding_context():
             embedded_context = self.embedding_net(context)
+        return self.global_loss(x0, embedded_context)
 
+    def global_loss(self, x0: torch.Tensor, embedded_context):
         noise = torch.randn_like(x0)
         t = torch.randint(
             0, self.num_timesteps, (x0.shape[0],), device=x0.device
@@ -130,10 +140,14 @@ class DiffusionArchitecture(torch.nn.Module):
         Draw `n` samples per event in `context` via DDIM sampling,
         using `self.sampling_timesteps` reverse diffusion steps.
         """
+        embedded_context = self.embedding_net(context)
+        return self.sample_global(n, embedded_context)
+
+    @torch.no_grad()
+    def sample_global(self, n: int, embedded_context) -> torch.Tensor:
         if not hasattr(self, "denoiser"):
             raise RuntimeError("Denoiser is not built")
 
-        embedded_context = self.embedding_net(context)
         batch = embedded_context.shape[0]
         device = embedded_context.device
 

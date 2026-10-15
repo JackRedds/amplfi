@@ -6,9 +6,10 @@ import torch
 
 from .components import ConditionalMLP
 from .embeddings.base import Embedding, load_embedding_weights
+from .slots import SlotArchitectureMixin, SlotHead
 
 
-class FlowMatchingArchitecture(torch.nn.Module):
+class FlowMatchingArchitecture(SlotArchitectureMixin, torch.nn.Module):
     """
     Base class for flow matching architectures that provides the
     interface for interacting with embedding networks, mirroring
@@ -39,6 +40,10 @@ class FlowMatchingArchitecture(torch.nn.Module):
             embedding weights.
         freeze_embedding:
             Whether to freeze the embedding network's weights.
+        slot_head:
+            Optional `SlotHead` for also inferring the number and
+            parameters of a signal's components. See
+            `amplfi.train.architectures.slots.SlotHead`
     """
 
     def __init__(
@@ -48,6 +53,7 @@ class FlowMatchingArchitecture(torch.nn.Module):
         sampling_steps: int = 100,
         embedding_weights: Optional[Path] = None,
         freeze_embedding: bool = False,
+        slot_head: Optional[SlotHead] = None,
     ):
         super().__init__()
         self.num_params = num_params
@@ -61,6 +67,8 @@ class FlowMatchingArchitecture(torch.nn.Module):
 
         if embedding_weights is not None:
             load_embedding_weights(self.embedding_net, embedding_weights)
+
+        self.init_slot_head(slot_head)
 
     def build_velocity_field(self) -> torch.nn.Module:
         raise NotImplementedError
@@ -76,7 +84,9 @@ class FlowMatchingArchitecture(torch.nn.Module):
 
         with self.embedding_context():
             embedded_context = self.embedding_net(context)
+        return self.global_loss(x1, embedded_context)
 
+    def global_loss(self, x1: torch.Tensor, embedded_context):
         x0 = torch.randn_like(x1)
         t = torch.rand(x1.shape[0], device=x1.device)
         x_t = x0 + t.unsqueeze(-1) * (x1 - x0)
@@ -94,10 +104,14 @@ class FlowMatchingArchitecture(torch.nn.Module):
         learned ODE from `t=0` to `t=1` with `self.sampling_steps`
         forward Euler steps.
         """
+        embedded_context = self.embedding_net(context)
+        return self.sample_global(n, embedded_context)
+
+    @torch.no_grad()
+    def sample_global(self, n: int, embedded_context) -> torch.Tensor:
         if not hasattr(self, "velocity_field"):
             raise RuntimeError("Velocity field is not built")
 
-        embedded_context = self.embedding_net(context)
         batch = embedded_context.shape[0]
         device = embedded_context.device
 
