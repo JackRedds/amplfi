@@ -168,11 +168,71 @@ def relative_hrss(parameters: dict[str, torch.Tensor]):
     the absolute per-component `hrss` is not identifiable, but
     `hrss_frac = hrss_i / sqrt(sum_j hrss_j^2)` is.
     """
-    hrss = parameters["hrss"]
+    parameters["hrss_frac"] = _hrss_fraction(parameters["hrss"])
+    return parameters
+
+
+def _hrss_fraction(hrss: torch.Tensor) -> torch.Tensor:
     # rescale before squaring, since hrss ~1e-23 underflows in float32
     hrss = hrss / hrss.amax(dim=-1, keepdim=True).clamp_min(1e-30)
     norm = hrss.pow(2).sum(dim=-1, keepdim=True).sqrt()
-    parameters["hrss_frac"] = hrss / norm
+    return hrss / norm
+
+
+def morlet_gabor_hrss(
+    amplitude: torch.Tensor,
+    quality: torch.Tensor,
+    frequency: torch.Tensor,
+    phase: torch.Tensor,
+    ellipticity: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Analytic hrss of an `ml4gw.waveforms.MorletGabor` wavelet,
+    from Parseval's theorem applied to its frequency-domain form:
+
+        hrss^2 = (1 + ellipticity^2) amplitude^2 tau sqrt(pi / 2) / 2
+                 * (1 + exp(-quality^2 / 2) cos(2 phase))
+
+    with `tau = quality / (2 pi frequency)`. This neglects truncation
+    of the wavelet by the finite time window. Unlike sine-Gaussians,
+    the wavelet's amplitude is not its hrss, so components with equal
+    amplitude can carry very different energy. Padded components
+    (zero quality and frequency) give an hrss of zero
+    """
+    tau = quality / (2 * torch.pi * frequency)
+    interference = 1 + torch.exp(-(quality**2) / 2) * torch.cos(2 * phase)
+    hrss_sq = (
+        (1 + ellipticity**2)
+        * tau
+        * (torch.pi / 2) ** 0.5
+        / 2
+        * interference
+    )
+    hrss = amplitude * hrss_sq.sqrt()
+    return torch.nan_to_num(hrss, nan=0.0)
+
+
+def relative_mg_hrss(parameters: dict[str, torch.Tensor]):
+    """
+    Conversion function for `AmplfiMultiWFPrior` with Morlet-Gabor
+    components, which adds `hrss_frac` like `relative_hrss`, but
+    computes each component's hrss from its `amplitude`, `quality`,
+    `frequency`, `phase` and `ellipticity` (see `morlet_gabor_hrss`)
+    """
+    # only relative amplitudes matter, and amplitude ~1e-21
+    # underflows in float32 once squared, so bring them to order 1
+    amplitude = parameters["amplitude"]
+    amplitude = amplitude / amplitude.amax(dim=-1, keepdim=True).clamp_min(
+        1e-30
+    )
+    hrss = morlet_gabor_hrss(
+        amplitude,
+        parameters["quality"],
+        parameters["frequency"],
+        parameters["phase"],
+        parameters["ellipticity"],
+    )
+    parameters["hrss_frac"] = _hrss_fraction(hrss)
     return parameters
 
 
@@ -194,6 +254,14 @@ def multi_sg_conversion(parameters: dict[str, torch.Tensor]):
     applying `relative_hrss` and `phase_to_cartesian`
     """
     return phase_to_cartesian(relative_hrss(parameters))
+
+
+def multi_mg_conversion(parameters: dict[str, torch.Tensor]):
+    """
+    Conversion function for multi-component Morlet-Gabor wavelets,
+    applying `relative_mg_hrss` and `phase_to_cartesian`
+    """
+    return phase_to_cartesian(relative_mg_hrss(parameters))
 
 
 class ParameterTransformer(torch.nn.Module):
@@ -239,4 +307,10 @@ def dequantize(x: torch.Tensor) -> torch.Tensor:
 # `n_components` is dequantized so it can be an inference parameter
 multi_sg_transformer = ParameterTransformer(
     hrss_tot=torch.log, hrss=torch.log, n_components=dequantize
+)
+
+# the same for multi-component Morlet-Gabor wavelets, whose
+# per-component strength is `amplitude` rather than `hrss`
+multi_mg_transformer = ParameterTransformer(
+    hrss_tot=torch.log, amplitude=torch.log, n_components=dequantize
 )

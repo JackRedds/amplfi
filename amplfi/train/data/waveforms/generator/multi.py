@@ -44,11 +44,15 @@ class MultiWFGenerator(WaveformGenerator):
         # MultiWaveform computes the summed waveform's hrss in float32,
         # which underflows when every component is faint (hrss ~1e-23),
         # giving a badly wrong rescaling to hrss_tot. When rescaling,
-        # only relative amplitudes matter, so bring them to order 1
-        if self.multi_wf.norm and "hrss" in components:
-            hrss = components["hrss"]
-            scale = hrss.amax(dim=-1, keepdim=True).clamp_min(1e-30)
-            components["hrss"] = hrss / scale
+        # only relative amplitudes matter, so bring them to order 1.
+        # Sine-Gaussians are parameterized by `hrss`, Morlet-Gabor
+        # wavelets by `amplitude`
+        if self.multi_wf.norm:
+            for key in ("hrss", "amplitude"):
+                if key in components:
+                    amp = components[key]
+                    scale = amp.amax(dim=-1, keepdim=True).clamp_min(1e-30)
+                    components[key] = amp / scale
 
         # MultiWaveform infers the number of components from `hrss_tot`,
         # so expand it if it was sampled once per event
