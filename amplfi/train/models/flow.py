@@ -177,9 +177,7 @@ class FlowModel(SlotModelMixin, AmplfiModel):
         )
 
         # calculate training prior probability of posterior samples
-        log_prior_of_posterior_samples = self.training_prior.log_prob(
-            samples_dict
-        )
+        log_prior_of_posterior_samples = self.log_prior(samples_dict)
 
         # when predicting, there will be no ground truth parameters
         injection_parameters = None
@@ -193,12 +191,14 @@ class FlowModel(SlotModelMixin, AmplfiModel):
             # create a dictionary of injection parameters
             # mapping from parameter string to the true
             # injection value, and add snr if provided
-            injection_parameters = {
-                k: float(v)
-                for k, v in zip(
-                    self.inference_params, parameters, strict=False
-                )
-            }
+            injection_parameters = self.drop_missing(
+                {
+                    k: float(v)
+                    for k, v in zip(
+                        self.inference_params, parameters, strict=False
+                    )
+                }
+            )
             injection_parameters["ra"] = injection_parameters["phi"]
 
             if snr is not None:

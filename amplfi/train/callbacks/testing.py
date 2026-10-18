@@ -509,12 +509,19 @@ class ProbProbPlot(pl.Callback):
 
     def on_test_epoch_end(self, _, pl_module: "FlowModel"):
         logger = pl_module._logger
+        # only include parameters with true values, which the
+        # test waveforms may not define for every inference parameter
+        keys = [
+            k
+            for k in pl_module.inference_params
+            if all(k in r.injection_parameters for r in pl_module.test_results)
+        ]
         logger.info("Making PP plot")
         bilby.result.make_pp_plot(
             pl_module.test_results,
             save=True,
             filename=pl_module.test_outdir / "plots" / "pp-plot.png",
-            keys=pl_module.inference_params,
+            keys=keys,
         )
 
         if pl_module.reweighted_results:
@@ -524,7 +531,7 @@ class ProbProbPlot(pl.Callback):
                 pl_module.reweighted_results,
                 save=True,
                 filename=outdir / "pp-plot.png",
-                keys=pl_module.inference_params,
+                keys=keys,
             )
 
 

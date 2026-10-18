@@ -86,6 +86,14 @@ class SlotFlowDataset(FlowDataset):
         slots = slots.reshape(shape)
         return torch.where(mask[..., None], slots, torch.zeros_like(slots))
 
+    def has_slot_targets(self, parameters: dict[str, Tensor]) -> bool:
+        """
+        Whether `parameters` define the per-component slot targets,
+        which e.g. CBC waveforms used for testing don't
+        """
+        keys = ["component_mask", *self.slot_params]
+        return all(k in parameters for k in keys)
+
     def fit_slot_scaler(self) -> ChannelWiseScaler:
         scaler = ChannelWiseScaler(self.num_slot_params)
         parameters = self.waveform_sampler.get_fit_parameters()
@@ -109,6 +117,16 @@ class SlotFlowDataset(FlowDataset):
         if stage in ["predict", "test"] and model.slot_scaler.built:
             self._logger.info("Using pre-fit slot scaler")
             self.slot_scaler = model.slot_scaler
+        elif stage in ["predict", "test"] and not self.has_slot_targets(
+            self.waveform_sampler.get_fit_parameters()
+        ):
+            # as for the global scaler, `--ckpt_path` is
+            # restored into this (shared) scaler after `setup`
+            self._logger.info(
+                "Waveform sampler doesn't generate slot parameters; "
+                "slot scaler will be restored from the checkpoint"
+            )
+            self.slot_scaler = model.slot_scaler
         else:
             self._logger.info("Fitting slot scaler to slot parameters")
             self.slot_scaler = self.fit_slot_scaler()
@@ -130,15 +148,30 @@ class SlotFlowDataset(FlowDataset):
             parameters = self.val_parameters
             stacked = self.val_inference_params
 
-        mask = parameters["component_mask"]
-        slots = self.stack_slots(parameters).float()
         self.num_global_params = stacked.shape[-1]
+        K, S = self.max_components, self.num_slot_params
+        has_targets = self.has_slot_targets(parameters)
+        if has_targets:
+            mask = parameters["component_mask"]
+            slots = self.stack_slots(parameters).float()
+        else:
+            # NaN slots and mask mark the slot targets as missing,
+            # which `unpack_parameters` and the model then skip
+            self._logger.warning(
+                "Waveforms don't define slot parameters; "
+                "their true values will be unavailable"
+            )
+            N = len(stacked)
+            mask = torch.full((N, K), float("nan"))
+            slots = torch.full((N, K, S), float("nan"))
         stacked = torch.column_stack(
             [stacked, slots.reshape(len(slots), -1), mask.float()]
         )
 
         if stage == "test":
             self.test_inference_params = stacked
+            if not has_targets:
+                return
             # save every per-component parameter of the injections
             # (not only slot_params, e.g. also the raw phase) alongside
             # the other injection parameters, NaN for padded components
@@ -156,12 +189,17 @@ class SlotFlowDataset(FlowDataset):
         K, S = self.max_components, self.num_slot_params
         unpacked = super().unpack_parameters(parameters[:, :num_global])
 
+        mask = parameters[:, num_global + K * S :]
+        if mask.isnan().all():
+            # slot targets weren't defined by the waveforms
+            return unpacked
+
         slots = parameters[:, num_global : num_global + K * S]
         slots = slots.reshape(-1, K, S)
         unpacked.update(
             {k: slots[..., i] for i, k in enumerate(self.slot_params)}
         )
-        unpacked["component_mask"] = parameters[:, num_global + K * S :] > 0.5
+        unpacked["component_mask"] = mask > 0.5
         return unpacked
 
     def inject(
@@ -171,6 +209,14 @@ class SlotFlowDataset(FlowDataset):
         plus: Tensor,
         parameters: dict[str, Tensor],
     ) -> tuple[Tensor, Tensor, dict[str, Tensor], Tensor]:
+        if not self.has_slot_targets(parameters):
+            # only when testing on waveforms without slot parameters
+            X, asds, global_params, snrs = super().inject(
+                X, cross, plus, parameters
+            )
+            targets = {"global": global_params, "slots": None, "mask": None}
+            return X, asds, targets, snrs
+
         mask = parameters["component_mask"].bool()
         slots = self.stack_slots(parameters)
 
