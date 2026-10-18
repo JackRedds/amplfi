@@ -1,5 +1,7 @@
+import pytest
 import torch
 from ml4gw.distributions import LogUniform
+import ml4gw.waveforms
 from ml4gw.waveforms import SineGaussian
 from torch.distributions import Uniform
 
@@ -8,8 +10,17 @@ from amplfi.train.models.base import AmplfiModel
 from amplfi.train.prior import (
     AmplfiMultiWFPrior,
     dequantize,
+    morlet_gabor_hrss,
+    multi_mg_conversion,
+    multi_mg_transformer,
     multi_sg_conversion,
     multi_sg_transformer,
+)
+
+# MorletGabor is only in newer versions of ml4gw
+MorletGabor = getattr(ml4gw.waveforms, "MorletGabor", None)
+requires_mg = pytest.mark.skipif(
+    MorletGabor is None, reason="installed ml4gw has no MorletGabor"
 )
 
 
@@ -114,6 +125,102 @@ def test_generator():
     # including when every component is faint
     parameters["hrss"][:4] *= 1e-3
     hc, hp = generator(**parameters)
+    hc, hp = hc.double(), hp.double()
+    hrss = torch.sqrt((hc**2 + hp**2).sum(-1) / 256)
+    torch.testing.assert_close(
+        hrss, parameters["hrss_tot"].double(), rtol=1e-3, atol=0
+    )
+
+
+def build_mg_prior(max_components=None):
+    return AmplfiMultiWFPrior(
+        n_wf=Uniform(1, 5),
+        priors={
+            "frequency": Uniform(32, 1024),
+            "quality": Uniform(2, 100),
+            "amplitude": LogUniform(1e-23, 5e-20),
+            "phase": Uniform(0, 6.283),
+            "ellipticity": Uniform(-1, 1),
+            "shifts": Uniform(-0.1, 0.1),
+        },
+        event_priors={"hrss_tot": LogUniform(1e-23, 5e-20)},
+        max_components=max_components,
+        conversion_function=multi_mg_conversion,
+    )
+
+
+@requires_mg
+def test_morlet_gabor_hrss():
+    # low qualities, so the cos(2 phase) interference term matters
+    N, sample_rate = 64, 4096
+    params = {
+        "quality": torch.rand(N, dtype=torch.float64) * 4 + 1,
+        "frequency": torch.rand(N, dtype=torch.float64) * 200 + 50,
+        "amplitude": torch.ones(N, dtype=torch.float64),
+        "phase": torch.rand(N, dtype=torch.float64) * 2 * torch.pi,
+        "ellipticity": torch.rand(N, dtype=torch.float64) * 2 - 1,
+        "shifts": torch.zeros(N, dtype=torch.float64),
+    }
+    cross, plus = MorletGabor(sample_rate, 4)(**params)
+    numerical = ((plus**2 + cross**2).sum(-1) / sample_rate).sqrt()
+    analytic = morlet_gabor_hrss(
+        params["amplitude"],
+        params["quality"],
+        params["frequency"],
+        params["phase"],
+        params["ellipticity"],
+    )
+    torch.testing.assert_close(analytic, numerical, rtol=1e-3, atol=0)
+
+    # padded components have zero hrss rather than nan
+    zero = torch.zeros(3)
+    assert (morlet_gabor_hrss(zero, zero, zero, zero, zero) == 0).all()
+
+
+def test_mg_prior():
+    N = 100
+    parameters = build_mg_prior(max_components=6)(N)
+    mask = parameters["component_mask"]
+    frac = parameters["hrss_frac"]
+    assert torch.isfinite(frac).all()
+    assert (frac[~mask] == 0).all()
+    torch.testing.assert_close(frac.pow(2).sum(-1), torch.ones(N))
+
+    transformed = multi_mg_transformer(
+        {k: v.clone() for k, v in parameters.items()}
+    )
+    torch.testing.assert_close(
+        transformed["amplitude"][mask], parameters["amplitude"][mask].log()
+    )
+    torch.testing.assert_close(
+        transformed["hrss_tot"], parameters["hrss_tot"].log()
+    )
+
+
+@requires_mg
+def test_mg_generator():
+    N = 8
+    prior = build_mg_prior(max_components=4)
+    generator = MultiWFGenerator(
+        generator=MorletGabor,
+        sample_rate=256,
+        kernel_length=2,
+        fduration=1,
+        inference_params=[],
+        num_val_waveforms=1,
+        num_test_waveforms=1,
+        num_fit_params=1,
+        training_prior=prior,
+    )
+    parameters = prior(N)
+    # keep frequencies below Nyquist
+    parameters["frequency"] = parameters["frequency"] / 8
+    # every component faint, which underflows without rescaling
+    parameters["amplitude"][:4] *= 1e-3
+    hc, hp = generator(**parameters)
+    assert hc.shape == hp.shape == (N, 3 * 256)
+    assert torch.isfinite(hc).all() and torch.isfinite(hp).all()
+
     hc, hp = hc.double(), hp.double()
     hrss = torch.sqrt((hc**2 + hp**2).sum(-1) / 256)
     torch.testing.assert_close(

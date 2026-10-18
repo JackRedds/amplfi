@@ -163,7 +163,9 @@ class SlotModelMixin:
         count_probs = slot_samples["count_probs"][0].cpu().numpy()
         result.meta_data["count_probs"] = count_probs.tolist()
 
-        if targets is not None and result.injection_parameters is not None:
+        # targets are None when the test waveforms don't define slots
+        has_targets = targets is not None and targets["mask"] is not None
+        if has_targets and result.injection_parameters is not None:
             true_mask = targets["mask"][0]
             true_slots = self.descale_slots(targets["slots"][0], true_mask)
             true_slots = true_slots.cpu().numpy()

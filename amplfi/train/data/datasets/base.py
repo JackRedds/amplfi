@@ -371,6 +371,17 @@ class AmplfiDataset(pl.LightningDataModule):
         if stage in ["predict", "test"] and self.trainer.model.scaler.built:
             self._logger.info("Using pre-fit standard scaler")
             self.scaler = self.trainer.model.scaler
+        elif stage in ["predict", "test"] and not self.can_fit_scaler():
+            # e.g. testing on waveforms from a different family than
+            # the model was trained on. Lightning restores `--ckpt_path`
+            # after `setup`, which loads the fit statistics into this
+            # (shared) scaler, so it needn't be fit here
+            self._logger.info(
+                "Waveform sampler can't generate all inference "
+                "parameters; standard scaler will be restored from "
+                "the checkpoint"
+            )
+            self.scaler = self.trainer.model.scaler
         else:
             self._logger.info("Fitting standard scaler to parameters")
             self.scaler = self.fit_scaler()
@@ -388,6 +399,19 @@ class AmplfiDataset(pl.LightningDataModule):
         psi = self.psi.sample((N,)).to(X.device)
         phi = self.phi.sample((N,)).to(X.device)
         return dec, psi, phi
+
+    def can_fit_scaler(self) -> bool:
+        """
+        Whether the waveform sampler's fit parameters cover
+        all (non-extrinsic) inference parameters
+        """
+        parameters = self.waveform_sampler.get_fit_parameters()
+        transformed = self.parameter_transformer(dict(parameters))
+        return all(
+            k in transformed
+            for k in self.hparams.inference_params
+            if k not in ["dec", "psi", "phi"]
+        )
 
     def fit_scaler(self):
         scaler = ChannelWiseScaler(self.num_params)
@@ -442,13 +466,9 @@ class AmplfiDataset(pl.LightningDataModule):
             )
             self.val_background = self.load_val_background(cross.shape[0])
             self._logger.info(f"Loaded {len(cross)} waveforms for validation")
-            params = []
-            # why is sky location not included in the parameters
-            for k in self.hparams.inference_params:
-                if k in parameters.keys():
-                    params.append(torch.Tensor(parameters[k]))
-
-            self.val_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
+            self.val_inference_params = self.stack_inference_params(
+                parameters, len(cross)
+            )
             self.val_parameters: dict[str, torch.tensor] = parameters
             self.val_waveforms = torch.stack([cross, plus], dim=0)
 
@@ -461,12 +481,9 @@ class AmplfiDataset(pl.LightningDataModule):
 
             self._logger.info(f"Loaded {len(cross)} waveforms for testing")
 
-            params = []
-            for k in self.hparams.inference_params:
-                if k in parameters.keys():
-                    params.append(torch.Tensor(parameters[k]))
-
-            self.test_inference_params = torch.column_stack(params) if len(params) != 0 else torch.empty((cross.shape[0], 0))
+            self.test_inference_params = self.stack_inference_params(
+                parameters, len(cross)
+            )
             # keep event-level parameters; per-component parameters of
             # multi-component waveforms have shape (N, K)
             self.test_parameters = pd.DataFrame(
@@ -508,6 +525,32 @@ class AmplfiDataset(pl.LightningDataModule):
         )
         background = next(iter(dataset))
         return background
+
+    def stack_inference_params(
+        self, parameters: dict[str, Tensor], N: int
+    ) -> Tensor:
+        """
+        Stack the non-extrinsic inference parameters into a tensor of
+        shape `(N, num_params)`, ordered as `unpack_parameters` expects.
+        Extrinsic parameters are sampled at injection time. Parameters
+        the waveforms don't define (e.g. `n_components` when testing a
+        burst model on CBC waveforms) are filled with NaN
+        """
+        params = []
+        for k in self.hparams.inference_params:
+            if k in ["dec", "psi", "phi"]:
+                continue
+            if k in parameters:
+                params.append(torch.as_tensor(parameters[k]).float())
+            else:
+                self._logger.warning(
+                    f"Waveforms don't define inference parameter {k}; "
+                    "its true value will be unavailable"
+                )
+                params.append(torch.full((N,), float("nan")))
+        if not params:
+            return torch.empty((N, 0))
+        return torch.column_stack(params)
 
     def unpack_parameters(self, parameters: Tensor) -> dict[str, Tensor]:
         """

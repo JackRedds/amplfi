@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 import lightning.pytorch as pl
+import numpy as np
 import torch
 from ml4gw.transforms import ChannelWiseScaler
 from amplfi.train.callbacks import SaveWandbUrl
@@ -160,6 +161,35 @@ class AmplfiModel(pl.LightningModule):
             if param in self.discrete_params:
                 parameters[:, i] = parameters[:, i].floor().clamp_min(1)
         return parameters
+
+    def log_prior(self, samples: dict[str, Tensor]) -> Tensor:
+        """
+        Log probability of posterior samples under the training prior.
+        This is NaN when the waveform sampler's prior doesn't define
+        every inference parameter, e.g. when testing on waveforms from
+        a different family than the model was trained on
+        """
+        try:
+            return self.training_prior.log_prob(samples)
+        except KeyError as e:
+            if not getattr(self, "_warned_log_prior", False):
+                self._logger.warning(
+                    f"Training prior doesn't define parameter {e}; "
+                    "setting log prior of posterior samples to NaN"
+                )
+                self._warned_log_prior = True
+            first = next(iter(samples.values()))
+            return torch.full((len(first),), float("nan"))
+
+    @staticmethod
+    def drop_missing(injection_parameters: dict[str, float]):
+        """
+        Remove parameters without a true value (NaN), which the
+        test waveforms didn't define
+        """
+        return {
+            k: v for k, v in injection_parameters.items() if not np.isnan(v)
+        }
 
     def configure_callbacks(self):
         callbacks = [SaveWandbUrl()]
