@@ -1,3 +1,4 @@
+import math
 from typing import Callable, Optional
 
 import torch
@@ -112,6 +113,18 @@ class AmplfiMultiWFPrior(AmplfiPrior):
         N: int,
         device: str = "cpu",
     ) -> dict[str, torch.Tensor]:
+        parameters = self.sample_components(N, device)
+        parameters = self.conversion_function(parameters)
+        return parameters
+
+    def sample_components(
+        self,
+        N: int,
+        device: str = "cpu",
+    ) -> dict[str, torch.Tensor]:
+        """
+        Sample parameters before `conversion_function` is applied
+        """
         rand_int = self.n_wf.sample((N,)).to(device).long()
         # ensure at least 1 component
         n_wavelets = torch.clamp(rand_int, min=1, max=self.max_components)
@@ -137,8 +150,6 @@ class AmplfiMultiWFPrior(AmplfiPrior):
 
         parameters["n_components"] = n_wavelets.float()
         parameters["component_mask"] = mask
-
-        parameters = self.conversion_function(parameters)
         return parameters
 
     def log_prob(self, samples: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -157,6 +168,242 @@ class AmplfiMultiWFPrior(AmplfiPrior):
                 prior = self.priors[param]
             log_probs += prior.log_prob(tensor).to(first.device)
         return log_probs
+
+
+def _log_uniform(
+    low: torch.Tensor, high: torch.Tensor
+) -> torch.Tensor:
+    # elementwise log-uniform samples between tensors of bounds
+    u = torch.rand(low.shape, dtype=low.dtype, device=low.device)
+    return torch.exp(low.log() + u * (high.log() - low.log()))
+
+
+class DurationConstrainedMultiWFPrior(AmplfiMultiWFPrior):
+    # Q = factor * frequency * tau, where tau is the 1/e envelope
+    # half-width, exp(-t^2 / tau^2), of each waveform
+    QUALITY_FACTORS = {
+        "morlet_gabor": 2 * math.pi,
+        "sine_gaussian": math.sqrt(2) * math.pi,
+    }
+
+    def __init__(
+        self,
+        n_wf: torch.distributions.Distribution,
+        burst_duration: torch.distributions.Distribution,
+        frequency: tuple[float, float],
+        quality: tuple[float, float],
+        priors: dict[str, torch.distributions.Distribution],
+        waveform: str = "morlet_gabor",
+        envelope_width: float = 3.0,
+        sample_rate: Optional[float] = None,
+        band_width: float = 2.0,
+        shared_priors: Optional[list[str]] = None,
+        event_priors: Optional[
+            dict[str, torch.distributions.Distribution]
+        ] = None,
+        max_components: Optional[int] = None,
+        conversion_function: Optional[Callable] = None,
+    ):
+        """
+        Multi-component prior in which an event-level `burst_duration`
+        bounds every component, so each component's envelope lies
+        inside `[-burst_duration / 2, burst_duration / 2]` around the
+        kernel center.
+
+        Each component has envelope `exp(-(t - shifts)^2 / tau^2)`,
+        with `tau = quality / (factor * frequency)` (see `waveform`).
+        Per event and then per component:
+
+            tau_max   = burst_duration / (2 * envelope_width)
+            frequency ~ LogUniform(f_low, f_high), with
+                f_low  = max(frequency[0], quality[0] / (factor tau_max))
+                f_high = min(max_frequency,
+                             f_nyq - band_width / (pi tau_max))
+            quality   ~ LogUniform(
+                max(quality[0], factor frequency tau_min),
+                min(quality[1], factor frequency tau_max),
+            )
+            shifts    ~ Uniform(-(D/2 - envelope_width tau),
+                                D/2 - envelope_width tau)
+
+        `tau_min = band_width / (pi (f_nyq - frequency))` is the band
+        limit: a component's spectrum, `exp(-pi^2 tau^2 (f - f0)^2)`,
+        must fall to `exp(-band_width^2)` by Nyquist, otherwise it is
+        truncated (or aliased) at the sample rate and leaks outside
+        its envelope. It is skipped if `sample_rate` is None. Since
+        `tau_min` grows towards Nyquist, it also caps frequencies at
+        `max_frequency`, above which no quality up to `quality[1]` is
+        band-limited.
+
+        Args:
+            n_wf:
+                Distribution of the number of components,
+                as in `AmplfiMultiWFPrior`
+            burst_duration:
+                Distribution of the event-level burst duration in
+                seconds. Returned as `burst_duration`, so it can be
+                used as an inference parameter. Every sample must be
+                at least `min_burst_duration`
+            frequency:
+                `(low, high)` bounds of the component frequencies (Hz)
+            quality:
+                `(low, high)` bounds of the component quality factors
+            priors:
+                Remaining per-component priors (e.g. `amplitude`,
+                `phase`, `ellipticity`). `frequency`, `quality` and
+                `shifts` are sampled by this class, so can't be given
+            waveform:
+                `"morlet_gabor"` (`tau = Q / (2 pi f)`) or
+                `"sine_gaussian"` (`tau = Q / (sqrt(2) pi f)`), matching
+                the `ml4gw.waveforms` generators
+            envelope_width:
+                Number of `tau` on each side of a component's center
+                that must fit inside the burst duration. At 3, the
+                envelope has fallen to `exp(-9)`
+            sample_rate:
+                Sample rate (Hz) of the generated waveforms, used for
+                the band limit. Must match the data config's
+                `sample_rate`
+            band_width:
+                Number of spectral half-widths `1 / (pi tau)` that must
+                fit between a component's frequency and Nyquist
+            shared_priors, event_priors, max_components,
+            conversion_function:
+                As in `AmplfiMultiWFPrior`
+        """
+        if waveform not in self.QUALITY_FACTORS:
+            raise ValueError(
+                f"waveform must be one of {list(self.QUALITY_FACTORS)}, "
+                f"got {waveform!r}"
+            )
+        sampled = {"frequency", "quality", "shifts"} & set(priors)
+        if sampled:
+            raise ValueError(
+                f"{sorted(sampled)} are sampled from burst_duration, "
+                "so can't be given in priors"
+            )
+        event_priors = dict(event_priors or {})
+        if "burst_duration" in event_priors:
+            raise ValueError(
+                "burst_duration is its own argument, so can't be given "
+                "in event_priors"
+            )
+        event_priors["burst_duration"] = burst_duration
+
+        if frequency[0] >= frequency[1] or quality[0] >= quality[1]:
+            raise ValueError("frequency and quality must be (low, high)")
+        if sample_rate is not None and frequency[1] > sample_rate / 2:
+            raise ValueError(
+                f"frequency upper bound {frequency[1]} exceeds Nyquist "
+                f"({sample_rate / 2})"
+            )
+
+        self.frequency = frequency
+        self.quality = quality
+        self.waveform = waveform
+        self.quality_factor = self.QUALITY_FACTORS[waveform]
+        self.envelope_width = envelope_width
+        self.sample_rate = sample_rate
+        self.band_width = band_width
+        super().__init__(
+            n_wf,
+            priors,
+            shared_priors=shared_priors,
+            event_priors=event_priors,
+            max_components=max_components,
+            conversion_function=conversion_function,
+        )
+
+    @property
+    def max_frequency(self) -> float:
+        """
+        Highest component frequency. With the band limit, a component
+        at frequency f needs quality >= factor f tau_min(f), which
+        reaches quality[1] at f_nyq q / (q + factor band_width / pi)
+        """
+        if self.sample_rate is None:
+            return self.frequency[1]
+        f_nyq = self.sample_rate / 2
+        q_max = self.quality[1]
+        band_q = self.quality_factor * self.band_width / math.pi
+        return min(self.frequency[1], f_nyq * q_max / (q_max + band_q))
+
+    @property
+    def min_burst_duration(self) -> float:
+        """
+        Shortest burst duration for which some frequency admits a
+        component of the minimum quality
+        """
+        # tau_max must satisfy f_low(tau_max) < f_high(tau_max), i.e.
+        # quality[0] / (factor tau) < max_frequency, and with the band
+        # limit, both quality[0] / (factor tau) and frequency[0] must be
+        # below f_nyq - band_width / (pi tau)
+        q_term = self.quality[0] / self.quality_factor
+        tau = q_term / self.max_frequency
+        if self.sample_rate is not None:
+            f_nyq = self.sample_rate / 2
+            band_term = self.band_width / math.pi
+            tau = max(
+                tau,
+                (q_term + band_term) / f_nyq,
+                band_term / (f_nyq - self.frequency[0]),
+            )
+        return 2 * self.envelope_width * tau
+
+    def sample_components(
+        self,
+        N: int,
+        device: str = "cpu",
+    ) -> dict[str, torch.Tensor]:
+        parameters = super().sample_components(N, device)
+        mask = parameters["component_mask"]
+        duration = parameters["burst_duration"]
+
+        if (duration < self.min_burst_duration).any():
+            raise ValueError(
+                f"Sampled burst_duration {duration.min().item():.3g} s "
+                "is below the shortest duration that fits a "
+                f"band-limited component, {self.min_burst_duration:.3g} s"
+            )
+
+        # sample in float64, since log-uniform bounds that depend on
+        # other parameters lose precision in float32
+        n_max = mask.shape[-1]
+        duration = duration.double()[:, None].expand(-1, n_max)
+        tau_max = duration / (2 * self.envelope_width)
+        factor = self.quality_factor
+
+        f_low = torch.clamp(
+            self.quality[0] / (factor * tau_max), min=self.frequency[0]
+        )
+        f_high = torch.full_like(tau_max, self.max_frequency)
+        if self.sample_rate is not None:
+            f_nyq = self.sample_rate / 2
+            f_high = torch.clamp(
+                f_nyq - self.band_width / (math.pi * tau_max),
+                max=self.max_frequency,
+            )
+        frequency = _log_uniform(f_low, f_high)
+
+        q_low = torch.full_like(frequency, self.quality[0])
+        if self.sample_rate is not None:
+            tau_min = self.band_width / (math.pi * (f_nyq - frequency))
+            q_low = torch.clamp(factor * frequency * tau_min, min=q_low)
+        q_high = torch.clamp(factor * frequency * tau_max, max=self.quality[1])
+        quality = _log_uniform(q_low, q_high)
+
+        tau = quality / (factor * frequency)
+        half_room = (duration / 2 - self.envelope_width * tau).clamp_min(0)
+        shifts = (2 * torch.rand_like(half_room) - 1) * half_room
+
+        dtype = parameters["burst_duration"].dtype
+        for name, value in [
+            ("frequency", frequency),
+            ("quality", quality),
+            ("shifts", shifts),
+        ]:
+            parameters[name] = value.to(dtype) * mask
+        return parameters
 
 
 def relative_hrss(parameters: dict[str, torch.Tensor]):
@@ -312,5 +559,8 @@ multi_sg_transformer = ParameterTransformer(
 # the same for multi-component Morlet-Gabor wavelets, whose
 # per-component strength is `amplitude` rather than `hrss`
 multi_mg_transformer = ParameterTransformer(
-    hrss_tot=torch.log, amplitude=torch.log, n_components=dequantize
+    hrss_tot=torch.log,
+    amplitude=torch.log,
+    burst_duration=torch.log,
+    n_components=dequantize,
 )

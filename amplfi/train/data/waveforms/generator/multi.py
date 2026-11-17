@@ -18,6 +18,15 @@ class MultiWFGenerator(WaveformGenerator):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        # priors that band-limit components to the sample rate
+        # (e.g. `DurationConstrainedMultiWFPrior`) must use this one
+        for prior in (self.training_prior, self.testing_prior):
+            rate = getattr(prior, "sample_rate", None)
+            if rate is not None and rate != self.sample_rate:
+                raise ValueError(
+                    f"{type(prior).__name__} has sample_rate {rate}, "
+                    f"but waveforms are generated at {self.sample_rate}"
+                )
         generator = generator(self.sample_rate, self.duration)
         self.multi_wf = MultiWaveform(generator, self.sample_rate, self.duration, norm)
         # only per-component parameters the generator accepts are

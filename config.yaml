@@ -1,0 +1,215 @@
+# lightning.pytorch==2.6.5
+seed_everything: 42
+trainer:
+  accelerator: cpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: null
+  logger: false
+  callbacks: null
+  fast_dev_run: false
+  max_epochs: 2
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: 1
+  enable_checkpointing: false
+  enable_progress_bar: false
+  enable_model_summary: false
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+  enable_autolog_hparams: true
+  model_registry: null
+model:
+  class_path: amplfi.train.models.flow.FlowModel
+  init_args:
+    arch:
+      class_path: amplfi.train.architectures.NSF
+      init_args:
+        transforms: 2
+        hidden_features:
+        - 8
+        - 8
+        passes: null
+        bins: 8
+        randperm: false
+        residual: false
+        embedding_net:
+          class_path: tests.conftest.SimpleTestEmbedding
+          init_args:
+            context_dim: 4
+        embedding_weights: null
+        freeze_embedding: false
+        slot_head: null
+    filter_params: true
+    samples_per_event: 10
+    min_samples_per_pix_dist: 5
+    max_samples_per_pixel: 20
+    target_prior: null
+    crossmatch: true
+    create_pp_plot: true
+    learning_rate: 0.01
+    pct_start: 0.5
+    train_outdir: /tmp/tmptz6832jy/output
+    pretrained_path: null
+    strict_loading: false
+    test_outdir: null
+    weight_decay: 0.0
+    verbose: false
+data:
+  class_path: amplfi.train.data.datasets.FlowDataset
+  init_args:
+    data_dir: /tmp/tmptz6832jy/data
+    inference_params:
+    - chirp_mass
+    - mass_ratio
+    - dec
+    - psi
+    - phi
+    dec:
+      class_path: ml4gw.distributions.Cosine
+      init_args:
+        low: -1.5707963267948966
+        high: 1.5707963267948966
+        validate_args: null
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 6.28318
+        validate_args: false
+    highpass: 25.0
+    sample_rate: 512.0
+    kernel_length: 1.0
+    fduration: 1.0
+    psd_length: 2.0
+    batches_per_epoch: 2
+    batch_size: 4
+    ifos:
+    - H1
+    - L1
+    waveform_sampler:
+      class_path: amplfi.train.data.waveforms.generator.cbc.CBCGenerator
+      init_args:
+        approximant:
+          class_path: ml4gw.waveforms.IMRPhenomPv2
+        f_min: 20.0
+        f_ref: 40.0
+        right_pad: 0.1
+        num_val_waveforms: 8
+        num_test_waveforms: 4
+        training_prior:
+          class_path: amplfi.train.prior.AmplfiPrior
+          init_args:
+            priors:
+              chirp_mass:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 20.0
+                  high: 40.0
+                  validate_args: false
+              mass_ratio:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.5
+                  high: 0.9
+                  validate_args: false
+              distance:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 200.0
+                  high: 800.0
+                  validate_args: false
+              inclination:
+                class_path: ml4gw.distributions.Sine
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              phic:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              a_1:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 0.5
+                  validate_args: false
+              a_2:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 0.5
+                  validate_args: false
+              tilt_1:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              tilt_2:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              phi_jl:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              phi_12:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+            conversion_function: amplfi.train.conversion.precessing_to_lalsimulation_parameters
+        testing_prior: null
+        num_fit_params: 10
+        jitter: 0.0
+    parameter_transformer: null
+    fftlength: 1
+    train_val_range: null
+    test_range: null
+    min_valid_duration: 100.0
+    num_files_per_batch: 1
+    max_num_workers: 6
+    verbose: false
+matmul_precision: highest
+optimizer: null
+lr_scheduler: null
+ckpt_path: null
+weights_only: null

@@ -4,6 +4,10 @@ From: /sw/external/NGC/pytorch_24.09-py3.sif
 %environment
     export PROJECT_DIR="/projects/bcse/"
     export CONTAINER_WORKDIR="/amplfi/"
+    # NGC images put CUDA forward-compat libs (an older libcuda) on
+    # LD_LIBRARY_PATH; docker's entrypoint strips them when the host driver
+    # is newer, but apptainer doesn't, causing CUDA error 803 on delta
+    export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v '/usr/local/cuda/compat' | paste -sd: -)
 
 %files
     ./amplfi /amplfi/amplfi

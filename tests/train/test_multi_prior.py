@@ -9,6 +9,7 @@ from amplfi.train.data.waveforms.generator.multi import MultiWFGenerator
 from amplfi.train.models.base import AmplfiModel
 from amplfi.train.prior import (
     AmplfiMultiWFPrior,
+    DurationConstrainedMultiWFPrior,
     dequantize,
     morlet_gabor_hrss,
     multi_mg_conversion,
@@ -226,3 +227,160 @@ def test_mg_generator():
     torch.testing.assert_close(
         hrss, parameters["hrss_tot"].double(), rtol=1e-3, atol=0
     )
+
+
+def build_duration_prior(
+    waveform="morlet_gabor",
+    sample_rate=2048,
+    burst_duration=None,
+    max_components=None,
+):
+    amplitude = "amplitude" if waveform == "morlet_gabor" else "hrss"
+    shape = "ellipticity" if waveform == "morlet_gabor" else "eccentricity"
+    return DurationConstrainedMultiWFPrior(
+        n_wf=Uniform(1, 8),
+        burst_duration=burst_duration or LogUniform(5e-3, 0.2),
+        frequency=(10, sample_rate / 2),
+        quality=(0.3, 90),
+        priors={
+            amplitude: LogUniform(0.07, 1),
+            "phase": Uniform(0, 6.283),
+            shape: Uniform(0, 1),
+        },
+        waveform=waveform,
+        sample_rate=sample_rate,
+        shared_priors=[shape],
+        event_priors={"hrss_tot": LogUniform(1e-23, 5e-20)},
+        max_components=max_components,
+        conversion_function=(
+            multi_mg_conversion
+            if waveform == "morlet_gabor"
+            else multi_sg_conversion
+        ),
+    )
+
+
+@pytest.mark.parametrize("waveform", ["morlet_gabor", "sine_gaussian"])
+def test_duration_prior_bounds(waveform):
+    N, sample_rate = 5000, 2048
+    prior = build_duration_prior(waveform, sample_rate, max_components=8)
+    parameters = prior(N)
+    mask = parameters["component_mask"]
+    assert parameters["burst_duration"].shape == (N,)
+    for key in ("frequency", "quality", "shifts"):
+        assert parameters[key].shape == (N, 8)
+        assert (parameters[key][~mask] == 0).all()
+
+    duration = parameters["burst_duration"][:, None].expand_as(mask)[mask]
+    f = parameters["frequency"][mask].double()
+    q = parameters["quality"][mask].double()
+    shifts = parameters["shifts"][mask].double()
+    tau = q / (prior.quality_factor * f)
+
+    # float32 storage, so allow for rounding
+    eps = 1e-5
+    assert (f >= 10 * (1 - eps)).all() and (f <= 1024 * (1 + eps)).all()
+    assert (q >= 0.3 * (1 - eps)).all() and (q <= 90 * (1 + eps)).all()
+    # every envelope fits in the burst duration
+    edge = shifts.abs() + prior.envelope_width * tau
+    assert (edge <= duration.double() / 2 * (1 + eps)).all()
+    # and every spectrum is band-limited
+    band = f + prior.band_width / (torch.pi * tau)
+    assert (band <= sample_rate / 2 * (1 + eps)).all()
+
+    # burst_duration is an event prior, so has a log prob
+    log_prob = prior.log_prob(
+        {"burst_duration": parameters["burst_duration"]}
+    )
+    assert torch.isfinite(log_prob).all()
+
+
+def test_duration_prior_min_duration():
+    prior = build_duration_prior()
+    d_min = prior.min_burst_duration
+    # matches the bound worked out for 2048 Hz, k = 3, c = 2
+    assert 3.9e-3 < d_min < 4.1e-3
+
+    # just above the minimum, frequency and quality ranges are valid
+    prior = build_duration_prior(
+        burst_duration=Uniform(d_min * 1.001, d_min * 1.01)
+    )
+    parameters = prior(1000)
+    mask = parameters["component_mask"]
+    assert torch.isfinite(parameters["quality"][mask]).all()
+    assert (parameters["quality"][mask] > 0).all()
+
+    # below it, sampling fails loudly
+    prior = build_duration_prior(
+        burst_duration=Uniform(d_min * 0.5, d_min * 0.9)
+    )
+    with pytest.raises(ValueError, match="below the shortest duration"):
+        prior(10)
+
+
+def test_duration_prior_validation():
+    kwargs = dict(
+        n_wf=Uniform(1, 3),
+        burst_duration=LogUniform(5e-3, 0.2),
+        frequency=(10, 1024),
+        quality=(0.3, 90),
+        sample_rate=2048,
+    )
+    with pytest.raises(ValueError, match="sampled from burst_duration"):
+        DurationConstrainedMultiWFPrior(
+            priors={"shifts": Uniform(-0.1, 0.1)}, **kwargs
+        )
+    with pytest.raises(ValueError, match="waveform must be"):
+        DurationConstrainedMultiWFPrior(
+            priors={}, waveform="gaussian", **kwargs
+        )
+    with pytest.raises(ValueError, match="exceeds Nyquist"):
+        DurationConstrainedMultiWFPrior(
+            priors={}, **{**kwargs, "sample_rate": 1024}
+        )
+
+
+@requires_mg
+def test_duration_generator():
+    N, sample_rate = 64, 512
+    prior = build_duration_prior(
+        sample_rate=sample_rate,
+        burst_duration=LogUniform(0.03, 0.5),
+        max_components=4,
+    )
+    generator = MultiWFGenerator(
+        generator=MorletGabor,
+        sample_rate=sample_rate,
+        kernel_length=2,
+        fduration=1,
+        inference_params=[],
+        num_val_waveforms=1,
+        num_test_waveforms=1,
+        num_fit_params=1,
+        training_prior=prior,
+    )
+    parameters = prior(N)
+    hc, hp = generator(**parameters)
+    assert torch.isfinite(hc).all() and torch.isfinite(hp).all()
+
+    # h_plus is confined to the burst duration (h_cross, the Hilbert
+    # transform of h_plus, has slowly decaying tails at low quality)
+    times = torch.arange(hp.shape[-1]) / sample_rate - generator.duration / 2
+    inside = times.abs() <= parameters["burst_duration"][:, None] / 2
+    energy = hp.double() ** 2
+    frac = (energy * inside).sum(-1) / energy.sum(-1)
+    assert (frac > 0.999).all()
+
+    # the prior's band limit has to use the generator's sample rate
+    with pytest.raises(ValueError, match="sample_rate"):
+        MultiWFGenerator(
+            generator=MorletGabor,
+            sample_rate=2 * sample_rate,
+            kernel_length=2,
+            fduration=1,
+            inference_params=[],
+            num_val_waveforms=1,
+            num_test_waveforms=1,
+            num_fit_params=1,
+            training_prior=prior,
+        )
